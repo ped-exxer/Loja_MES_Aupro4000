@@ -16,7 +16,8 @@
     "dev:loja-web": "npm run dev -w @aupro/loja",
     "dev:mes-web": "npm run dev -w @aupro/mes",
     "db-mes": "node scripts/gerar-db-mes.ts",
-    "ponta-a-ponta": "node scripts/ponta-a-ponta.mjs"
+    "ponta-a-ponta": "node scripts/ponta-a-ponta.mjs",
+    "manuais": "node docs/tools/manuais/gerar.mjs"
   },
   "engines": {
     "node": ">=24"

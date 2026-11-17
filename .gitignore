@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.log
+
+# Gerador dos manuais em PDF: o HTML intermediário é refeito a cada geração (o PDF em docs/pdf/ vai no git)
+docs/tools/manuais/out/
