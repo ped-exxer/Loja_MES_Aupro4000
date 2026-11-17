@@ -1,7 +1,7 @@
 // A tela da Loja (ERP): vitrine, pedidos, faturas, catálogo, certificado. Rotas por hash. Sem login e sem papéis.
 // A produção (fila, bancada, qualidade, indicadores) é do MES, que tem a tela dele (link no topo).
 
-import { ProvedorIdioma, Topo, useRota } from '@aupro/interface';
+import { ProvedorAvisos, ProvedorIdioma, Topo, useRota } from '@aupro/interface';
 import { textos, useIdioma } from './i18n/index.ts';
 import { Acompanhamento, Certificado, Vitrine } from './paginas/loja.tsx';
 import { Vendas } from './paginas/erp.tsx';
@@ -10,7 +10,9 @@ import { Configuracao } from './paginas/configuracao.tsx';
 export function App() {
   return (
     <ProvedorIdioma textos={textos}>
-      <Telas />
+      <ProvedorAvisos>
+        <Telas />
+      </ProvedorAvisos>
     </ProvedorIdioma>
   );
 }
@@ -42,7 +44,7 @@ function Telas() {
           { rota: 'configuracao', rotulo: t.menu.configuracao },
         ]}
       />
-      <main>{pagina}</main>
+      <main id="conteudo" tabIndex={-1}>{pagina}</main>
     </>
   );
 }

@@ -1,7 +1,8 @@
 // A tela do MES: fila, bancada, qualidade, indicadores, detalhe da OP e configuração da bancada. Rotas por hash.
 // Os pedidos e a vitrine são da Loja, que tem a tela dela (link no topo).
 
-import { ProvedorIdioma, Topo, useRota } from '@aupro/interface';
+import { ProvedorAvisos, ProvedorIdioma, Topo, useRota } from '@aupro/interface';
+import { useBancada } from './bancada.ts';
 import { textos, useIdioma } from './i18n/index.ts';
 import { Bancada, DetalheOp, Fila, Indicadores, Qualidade } from './paginas/mes.tsx';
 import { Configuracao } from './paginas/configuracao.tsx';
@@ -9,7 +10,9 @@ import { Configuracao } from './paginas/configuracao.tsx';
 export function App() {
   return (
     <ProvedorIdioma textos={textos}>
-      <Telas />
+      <ProvedorAvisos>
+        <Telas />
+      </ProvedorAvisos>
     </ProvedorIdioma>
   );
 }
@@ -31,6 +34,7 @@ function Telas() {
     <>
       <Topo
         sistema="mes"
+        extra={<EstadoClp />}
         marcada={marcada}
         menu={[
           { rota: '', rotulo: t.menu.fila },
@@ -40,7 +44,23 @@ function Telas() {
           { rota: 'configuracao', rotulo: t.menu.configuracao },
         ]}
       />
-      <main>{pagina}</main>
+      <main id="conteudo" tabIndex={-1} className={secao === 'bancada' ? 'painel' : undefined}>{pagina}</main>
     </>
+  );
+}
+
+/** No topo de todas as telas do MES: a comunicação com o CLP (leva à Bancada). */
+function EstadoClp() {
+  const { t } = useIdioma();
+  const { bancada } = useBancada();
+  if (!bancada) return null;
+  const semClp = !bancada.conectado || !bancada.clpVivo || bancada.comunicacaoPerdida;
+  const ok = !semClp && !bancada.alarme;
+  const texto = !bancada.conectado ? t.bancada.desconectado : semClp ? t.bancada.clpParado
+    : bancada.alarme ? `${t.bancada.alarme}: ${t.alarme[bancada.alarme] ?? bancada.alarme}` : t.bancada.clpVivo;
+  return (
+    <a className={`topo-estado${ok ? '' : ' ruim'}`} href="#/bancada" aria-label={texto} title={texto}>
+      <span>{texto}</span>
+    </a>
   );
 }

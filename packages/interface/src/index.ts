@@ -3,6 +3,8 @@
 
 export * from './infra.ts';
 export * from './componentes.tsx';
+export * from './graficos.tsx';
+export * from './tema.ts';
 export * from './idioma.ts';
 export * from './topo.tsx';
 export type * from './tipos.ts';

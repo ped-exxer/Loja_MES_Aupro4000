@@ -2,38 +2,43 @@
 // A configuração da bancada (driver, CPU, DB) é do MES, na tela dele.
 
 import { useState } from 'react';
-import { Cartao, MensagemErro, api } from '@aupro/interface';
+import { Botao, Cartao, Confirmacao, MensagemErro, Pagina, api, useAcao } from '@aupro/interface';
 import { useIdioma } from '../i18n/index.ts';
 import { Catalogo } from './erp.tsx';
 
 export function Configuracao() {
   const { t } = useIdioma();
-  const [erro, setErro] = useState<unknown>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  const acao = useAcao();
+  const [confirmando, setConfirmando] = useState(false);
 
   async function reiniciar() {
-    if (!confirm(t.configuracao.reiniciarConfirma)) return;
-    setErro(null);
-    setAviso(null);
-    try {
+    await acao.executar('reiniciar', async () => {
       await api('/api/admin/reiniciar', { corpo: {} });
-      setAviso(t.configuracao.reiniciado);
-    } catch (e) {
-      setErro(e);
-    }
+      return t.configuracao.reiniciado;
+    });
+    setConfirmando(false);
   }
 
   return (
-    <>
+    <Pagina titulo={t.configuracao.titulo}>
       <Catalogo />
-      <Cartao titulo={t.configuracao.reiniciar}>
+      <Cartao titulo={t.configuracao.reiniciar} className="perigo">
         <p className="suave">{t.configuracao.reiniciarTexto}</p>
-        <MensagemErro erro={erro} />
-        {aviso && <div className="aviso aviso-ok">{aviso}</div>}
-        <button className="perigo" onClick={reiniciar}>
+        <MensagemErro erro={acao.erro} />
+        <Botao variante="perigo" icone="repetir" onClick={() => setConfirmando(true)}>
           {t.configuracao.reiniciar}
-        </button>
+        </Botao>
       </Cartao>
-    </>
+      <Confirmacao
+        aberto={confirmando}
+        titulo={`${t.configuracao.reiniciar}?`}
+        texto={t.configuracao.reiniciarConfirma}
+        confirmar={t.configuracao.reiniciar}
+        perigo
+        ocupado={acao.ocupado === 'reiniciar'}
+        aoConfirmar={reiniciar}
+        aoFechar={() => setConfirmando(false)}
+      />
+    </Pagina>
   );
 }
