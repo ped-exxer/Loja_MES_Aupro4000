@@ -153,10 +153,10 @@ A Loja chama o MES pela variável `MES_URL` (no Compose, `http://mes:8081`). For
 
 | Método e caminho | Corpo / resposta | Para quê |
 |---|---|---|
-| `POST /api/ordens` | `{ ordens: [{ origem, receita, tolerancias, prazo?, autor? }] }` → `201 { numeros }`; `422` com os erros por campo (`ordens.<i>.<campo>`) | Emitir as OPs de um pedido, **todas ou nenhuma** (uma transação no MES). Origem `loja:item:<id do item>` |
+| `POST /api/ordens` | `{ ordens: [{ origem, receita, tolerancias, prazo?, autor?, substitui? }] }` → `201 { numeros }` (`200` se todas já existiam); `422` com os erros por campo (`ordens.<i>.<campo>`); `409 ordem_ativa` | Emitir as OPs de um pedido, **todas ou nenhuma** (uma transação no MES). Origem `loja:item:<id do item>`. **Idempotente pela origem** (abaixo) |
 | `POST /api/ordens/:numero/cancelar` | → `{ resultado: 'cancelada' \| 'pendente' }`; `409` se não pode | Cancelar (na fila: já; disponível ao CLP: depois da retirada) |
 | `POST /api/ordens/prazos` | `{ receitas }` → `{ prazos }` | Promessa de prazo de cada receita, somando a fila da frente |
-| `GET /api/ordens/andamento?numeros=1,2` | → `[{ numero, estado, prazo, posicaoFila, fimEstimado, etapa, processo, batelada }]` | Acompanhamento; `etapa` e `processo` (ao vivo) só da OP em produção |
+| `GET /api/ordens/andamento?numeros=1,2` | → `[{ numero, estado, prazo, posicaoFila, fimEstimado, etapa, processo, batelada, recusa }]` | Acompanhamento; `etapa` e `processo` (ao vivo) só da OP em produção; `recusa` = código com que o CLP recusou a OP (ou `null`) |
 | `GET /api/ordens/:numero` | → dossiê (`ordem, batelada, avaliacao, inspecao, leituras, eventos`) ou `404` | Certificado |
 | `GET /api/ordens/mudancas?desde=<cursor>` | → `{ mudancas: [{ id, numero, origem, estado, horario }], ultimo }` | **Feed de mudanças**: cada mudança de estado de OP, com `id` crescente (o cursor) |
 | `POST /api/admin/reiniciar` | → `{ ok }` | "Reiniciar a aula" da Loja |
@@ -168,7 +168,18 @@ A Loja chama o MES pela variável `MES_URL` (no Compose, `http://mes:8081`). For
 - **MES fora do ar:** a Loja responde `503 { erro: 'mes_fora_do_ar' }` (a tela traduz). No checkout, o pedido é
   gravado numa transação que só termina depois que o MES emitiu as OPs: se o MES não responde, nada fica gravado.
   A vitrine abre sem os prazos, com um aviso; os pedidos aparecem sem o andamento até o MES voltar.
-- Cada tela recebe avisos **do seu sistema** (SSE em `/api/eventos`): a do MES, `ordem`, `bancada`, `parada`; a da
+- **[DECIDIDA] Emissão idempotente pela origem** (`decidirEmissao`, em `packages/dominio`): a origem identifica o
+  item de quem emite. Se já existe OP daquela origem, o MES **devolve o número dela** em vez de criar outra; para
+  **produzir de novo** um item, a Loja manda `substitui` = número da OP anterior, e o MES só cria a nova se a
+  anterior estiver num **estado final** (senão, `409 ordem_ativa`). Assim uma origem nunca tem duas OPs ativas, e
+  a Loja pode **repetir** a emissão quando a resposta se perde (a primeira tentativa e mais duas) sem duplicar.
+  Se ela desistir e desfizer o pedido, a OP que o MES tenha criado aparece no feed sem item na Loja, e a Loja a
+  **cancela**; uma OP nova que a Loja não chegou a anotar no item é **adotada** (`decidirMudanca`, em
+  `apps/loja/api/mudancas.ts`). As OPs manuais (origem `manual`) são sempre novas. A origem vale para sempre:
+  recriar a base da Loja sem a do MES pede "Reiniciar o MES".
+- **Listas que crescem** (ordens e registros do MES, pedidos, faturas e clientes da Loja) aceitam `?limite=` e
+  `?antes=<id do último da página anterior>`; sem eles, vem a página mais recente.
+- Cada tela recebe avisos **do seu sistema** (SSE em `/api/eventos`): a do MES, `ordem`, `bancada`, `parada`, `alarme` (o intertravamento ativo mudou) e `configuracao`; a da
   Loja, `pedido` e `producao` (este quando o feed traz mudanças).
 
 ## 4. Sem papéis
@@ -262,11 +273,11 @@ de escrever.
 |---|---|---|---|
 | 32 | VidaClp | Word | O CLP soma 1 a cada ciclo |
 | 34 | EcoSeq | Word | `SeqPedido` do último pedido que o CLP **recebeu** (pegou para produzir) |
-| 36 | Resultado | Int | Do pedido recebido: 0 aceito; >0 recusado (ex.: fora da faixa) |
+| 36 | Resultado | Int | Do pedido recebido: 0 aceito; >0 recusado, com o motivo (tabela abaixo) |
 | 38 | Estado | Int | Informativo: 0 ocioso, 1 em produção, 2 parada, 3 em falha |
 | 40 | Etapa | Int | Informativo: 0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver, 6 resfriar |
 | 42 | OpExecucao | DInt | OP em produção (0 = nenhuma) |
-| 46 | Alarme | Word | Código do último alarme/intertravamento |
+| 46 | Alarme | Word | Intertravamento **ativo** (tabela abaixo); 0 = nenhum |
 | 48 | OpConcluida | DInt | Última OP que terminou; os campos abaixo são dela |
 | 52 | ResultadoOp | Int | 1 concluída, 2 abortada |
 | 54 | VolumeProduzido | Real | L no TQ-02 |
@@ -286,6 +297,30 @@ no DB `MES`.
 
 **Assinatura (bytes 96–101):** `Assinatura : Word := 16#4D45` ("ME") e `AssinaturaValor : Real := 4000.75`. O gateway
 procura o DB que tem esses valores.
+
+**Códigos de `Alarme` e de `Resultado`** (**proposta, a confirmar com o programa do CLP**; decisão 9). Ficam num
+lugar só, `packages/contrato-clp/src/codigos.ts`, de onde saem o simulador, o MES e os comentários do `MES.db`; o
+detalhe está em [docs/programa-clp.md](docs/programa-clp.md), seção 6.
+
+| `Alarme` | Intertravamento (P&ID v2 e folha 4) | | `Resultado` | Motivo da recusa |
+|---|---|---|---|---|
+| 0 | nenhum | | 0 | aceito |
+| 1 | emergência | | 1 | fora da faixa (genérico, ou mais de um campo) |
+| 2 | PSH-103: pressão alta no TQ-01 | | 2 | volume fora da faixa |
+| 3 | TSH-104: temperatura alta no TQ-01 | | 3 | temperatura fora da faixa |
+| 4 | LSL-104: TQ-01 sem nível (resistência a seco) | | 4 | vazão fora da faixa |
+| 5 | FSL-102: B1 sem vazão | | 5 | pressão fora da faixa |
+| 6 | LSL do reservatório: sem água | | 6 | bancada em falha |
+| 7 | LSH-101: TQ-02 cheio | | | |
+| 8 | LSL-101: TQ-02 sem nível | | | |
+| 9 | PTT-106: falta de ar de instrumento | | | |
+| 10 | FY-102: falha do inversor da B1 | | | |
+| 11 | FY-105: falha do inversor do M1 | | | |
+
+`Alarme` é o que está ativo agora (com mais de um, o de menor código) e volta a 0 quando passa. O MES não decide
+nada com ele: mostra na tela da Bancada, registra o começo e o fim (registros `alarme` e `alarme_fim`, com o
+código) e sugere o motivo ao apontar a parada (cada alarme tem um motivo em `MOTIVOS_PARADA`). O código da recusa
+fica na OP recusada (`ordem.recusa`) e no registro `clp_recusou`. As telas traduzem os códigos.
 
 ### 6.4 Aperto de mão (handshake)
 
@@ -326,11 +361,20 @@ gerada do contrato: [docs/clp/MES.db](docs/clp/MES.db) (`npm run db-mes`).
 **[DECIDIDA]** Biblioteca pronta: **`nodes7`** (JavaScript puro, sem compilação nativa, boa no Docker; `node-snap7`
 foi descartada por precisar compilar). O gateway lê e escreve faixas de bytes do DB `MES` com ela e converte com
 `packages/contrato-clp`. A busca do DB pela assinatura (botão "procurar" da Configuração) é do gateway: lê os bytes
-80–85 de cada DB candidato e confere com `conferirAssinatura`. O cliente S7 do Simmaq 3DX
-(`src/main/modbus/s7/`) fica só como referência de tratamento de erros.
+da assinatura (96–101) de cada DB candidato, 20 DBs por leitura, e confere com `conferirAssinatura`. O cliente S7
+do Simmaq 3DX (`src/main/modbus/s7/`) fica só como referência de tratamento de erros.
 
-Os códigos de erro do S7 (16#8104, 16#05, 16#0A) vêm da literatura do snap7 e **ainda não foram medidos numa CPU real**:
-a primeira tarefa de integração (fase 4) é uma prova na bancada.
+**Prova sem CPU.** O driver (`apps/gateway/src/s7.ts`) e o serviço do gateway passam nos testes de
+`apps/gateway/src/s7.test.ts` contra um **servidor S7 de teste** (`apps/gateway/src/teste/servidor-s7.ts`:
+ISO-on-TCP, negociação, leitura e escrita em DB, com os DBs em memória): conectar, ler o DB `MES` inteiro num
+pedido, gravar só a área de escrita, achar os dois DBs pela assinatura entre vários, ler as variáveis de processo
+do `MB_Simulador`, DB sem assinatura, DB inexistente, CPU fora do ar e de volta, conexão derrubada, equipamento que
+não responde. **O servidor de teste é uma imitação escrita a partir da descrição do protocolo**, não uma CPU: prova
+que o driver fala o protocolo e trata os erros, e **não substitui a prova na bancada**.
+
+Os códigos de erro do S7 (16#8104, 16#05, 16#0A) vêm da literatura do snap7 e **ainda não foram medidos numa CPU real**
+(o servidor de teste responde com eles porque a literatura diz): a primeira tarefa de integração (fase 4) continua
+sendo a prova na bancada.
 
 ## 7. As três "fábricas" possíveis
 
@@ -406,12 +450,13 @@ do envio só mudam pelo que o CLP informa:
 | 1 | MES com o driver simulado: OP manual, fila sequenciada, despacho um por vez, registro da batelada | Várias OPs passam pelo simulado, na ordem do sequenciamento | Feita |
 | 2 | Vitrine + ERP: catálogo, pedido, ordens de produção, acompanhamento, certificado | Pedido na vitrine vira OP e o cliente vê a produção | Feita |
 | 3 | Qualidade, paradas, OEE, faturamento fictício, relatórios | OEE da aula calculado e exportável | Feita |
-| 4 | Driver S7: prova na bancada (conectar, achar o DB, ler, escrever), depois o programa do CLP com o DB `MES` | Uma batelada real pedida na vitrine | Driver S7 (`nodes7`) e busca do DB escritos, **não provados numa CPU**; programa do CLP: com o responsável |
+| 4 | Driver S7: prova na bancada (conectar, achar o DB, ler, escrever), depois o programa do CLP com o DB `MES` | Uma batelada real pedida na vitrine | Driver S7 (`nodes7`) e busca do DB **passam contra o servidor S7 de teste** (seção 6.6) e continuam **sem prova numa CPU real**; códigos de alarme e de recusa propostos (decisão 9); programa do CLP: com o responsável |
 | 5 | Simmaq 3DX como fábrica (projeto do Simmaq) | A mesma aula sem bancada | — |
 | 6 | Manutenção, driver OPC UA | Conforme a demanda | — |
 
 As fases 1 a 3 passam no `scripts/ponta-a-ponta.mjs` (pedido → sequenciamento → produção → inspeção automática → fatura →
-certificado → cancelamento → queda de comunicação → OP abortada → OEE e CSV), e o MES foi testado reiniciando o MES
+certificado → cancelamento → emissão repetida e OP órfã → queda de comunicação → alarme → OP abortada → produzir de
+novo → OEE e CSV → entradas inválidas e paginação), e o MES foi testado reiniciando o MES
 e o gateway no meio da produção (reconcilia sem perder nem duplicar OP). Depois da separação em dois sistemas, o
 mesmo script recebe as duas URLs e confere também a Loja recusando o pedido com o MES parado.
 
@@ -428,7 +473,11 @@ mesmo script recebe as duas URLs e confere também a Loja recusando o pedido com
 6. **[DECIDIDA]** Sem licenciamento e sem nome de produto: o topo mostra **AUPRO4000 · Loja** ou **AUPRO4000 · MES**.
 7. **[DECIDIDA]** Uma Loja/MES por bancada.
 8. **[DECIDIDA]** Sem login e sem papéis: ninguém se identifica (seção 4).
-9. **[ABERTA]** Códigos de `Resultado` > 0 (motivos de recusa do CLP) e de `Alarme`: definir com o programa do CLP.
+9. **[ABERTA: proposta feita, a confirmar com o programa do CLP]** Códigos de `Resultado` > 0 (motivos de recusa
+   do CLP) e de `Alarme`: tabela proposta na seção 6.3, a partir dos intertravamentos do P&ID versão 2, e já usada
+   pelo simulador, pelo MES e pelo `MES.db` (`packages/contrato-clp/src/codigos.ts`). Falta quem escreve o programa
+   do CLP confirmar os códigos e dizer quando cada alarme atua (limites do PTT-106 e das chaves, pendentes em
+   `docs/instrumentos-notas.md`).
 10. **[ABERTA]** Parâmetros da estimativa de ciclo (`packages/dominio/src/ciclo.ts`: 60 s pressurizar, 1,4 s/°C/L
     aquecer, 8 s/°C/L resfriar, 240 s devolver, TQ-01 de 10 L): medir na bancada e ajustar. A potência do resistor
     TZ-104 ainda não é conhecida (pergunta enviada ao projetista).

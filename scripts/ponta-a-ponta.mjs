@@ -2,8 +2,13 @@
 //   node scripts/ponta-a-ponta.mjs [url-da-loja] [url-do-mes]      (padrão http://localhost:8080 e :8081)
 // Reinicia a aula (pela Loja, que reinicia o MES), acelera o simulador e confere: pedido na Loja → OPs no MES →
 // sequenciamento → produção → inspeção automática → fatura (pelo feed de mudanças) → certificado; cancelamento;
-// queda de comunicação; OP abortada; indicadores e CSV; e, se o docker estiver à mão, a Loja recusando o pedido com
-// o MES parado (para o contêiner mes e sobe de novo; termina com tudo no ar). Sem docker: --sem-docker.
+// emissão idempotente e OP órfã; queda de comunicação; alarme; OP abortada e "produzir de novo"; indicadores e CSV;
+// entradas inválidas e paginação; e, se o docker estiver à mão, a Loja recusando o pedido com o MES parado (para o
+// contêiner mes e sobe de novo; termina com tudo no ar). Sem docker: --sem-docker.
+//
+// O contêiner `mes` parado é o do projeto compose desta pasta. Para uma pilha subida com outro nome de projeto
+// (`docker compose -p <nome> up`), informe o mesmo nome em COMPOSE_PROJECT_NAME. O script confere, pela porta
+// publicada, que o `mes` desse projeto é mesmo o da URL testada; se não for, não para nada e acusa a falha.
 
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +52,30 @@ async function ate(descricao, fn, limiteMs = 120_000) {
 }
 
 const estadoOp = async (n) => (await mes('GET', `/api/mes/ordens/${n}`)).ordem.situacao.estado;
+
+/** Só o status HTTP de um pedido (para conferir as recusas); `cru` manda o texto como está, com content-type JSON. */
+async function status(base, metodo, caminho, corpo, cru) {
+  const r = await fetch(`${base}${caminho}`, {
+    method: metodo,
+    headers: corpo === undefined && cru === undefined ? {} : { 'content-type': 'application/json' },
+    body: cru ?? (corpo === undefined ? undefined : JSON.stringify(corpo)),
+  });
+  await r.arrayBuffer();
+  return r.status;
+}
+
+const docker = (...args) => execFileSync('docker', ['compose', ...args], { cwd: RAIZ, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+
+/** O `mes` do projeto compose em uso publica a porta da URL testada? (não parar o contêiner de outra pilha) */
+function mesDoComposeEhODaUrl() {
+  try {
+    const publicada = docker('port', 'mes', '8081').trim().split('\n')[0].split(':').pop();
+    const u = new URL(MES);
+    return publicada === (u.port || (u.protocol === 'https:' ? '443' : '80'));
+  } catch {
+    return false;
+  }
+}
 
 // ------------------------------------------------------------------
 const saudeLoja = await loja('GET', '/api/saude');
@@ -158,6 +187,29 @@ try {
   console.log('5. Cancelamento');
   const ocupa = await mes('POST', '/api/mes/ordens', { volume: 20, temperatura: 65, vazao: 1, pressao: 2 });
   await ate('OP longa em produção', async () => (await estadoOp(ocupa.numero)) === 'em_producao', 20_000);
+
+  // 5a. emissão idempotente pela origem (contrato): repetir a chamada devolve a mesma OP, não cria outra
+  console.log('5a. Emissão idempotente e OP órfã');
+  const ordemTeste = { origem: 'teste:idempotencia', receita: { volume: 5, temperatura: 45, vazao: 4, pressao: 2 }, tolerancias: { temperatura: 2, volume: 0.5 } };
+  const emissao1 = await mes('POST', '/api/ordens', { ordens: [ordemTeste] });
+  const emissao2 = await mes('POST', '/api/ordens', { ordens: [ordemTeste] });
+  confere(emissao1.numeros.length === 1 && emissao2.numeros[0] === emissao1.numeros[0], `repetir a emissão devolve a mesma OP (${emissao1.numeros[0]})`);
+  confere((await mes('GET', '/api/mes/fila')).filter((f) => f.ordem.origem === ordemTeste.origem).length === 1, 'a fila tem uma OP só dessa origem');
+  confere((await status(MES, 'POST', '/api/ordens', { ordens: [{ ...ordemTeste, substitui: emissao1.numeros[0] }] })) === 409,
+    'substituir uma OP que ainda não terminou é recusado (409)');
+  await mes('POST', `/api/ordens/${emissao1.numeros[0]}/cancelar`);
+  await ate('OP de teste cancelada', async () => (await estadoOp(emissao1.numeros[0])) === 'cancelada', 10_000);
+  const emissao3 = await mes('POST', '/api/ordens', { ordens: [{ ...ordemTeste, substitui: emissao1.numeros[0] }] });
+  const emissao4 = await mes('POST', '/api/ordens', { ordens: [{ ...ordemTeste, substitui: emissao1.numeros[0] }] });
+  confere(emissao3.numeros[0] > emissao1.numeros[0] && emissao4.numeros[0] === emissao3.numeros[0],
+    'no lugar de uma OP terminada cria uma nova, e repetir devolve a mesma');
+  await mes('POST', `/api/ordens/${emissao3.numeros[0]}/cancelar`);
+  await ate('segunda OP de teste cancelada', async () => (await estadoOp(emissao3.numeros[0])) === 'cancelada', 10_000);
+  // OP com origem da Loja mas sem item na Loja (a resposta da emissão se perdeu e o pedido foi desfeito):
+  // a Loja a vê no feed e a cancela
+  const orfa = await mes('POST', '/api/ordens', { ordens: [{ ...ordemTeste, origem: 'loja:item:987654321' }] });
+  await ate('OP órfã cancelada pela Loja', async () => (await estadoOp(orfa.numeros[0])) === 'cancelada', 15_000)
+    .then(() => confere(true, 'OP sem pedido na Loja é cancelada pela Loja (feed)'), () => confere(false, 'OP sem pedido na Loja é cancelada pela Loja (feed)'));
   const a = await mes('POST', '/api/mes/ordens', { volume: 5, temperatura: 45, vazao: 4, pressao: 2 });
   const b = await mes('POST', '/api/mes/ordens', { volume: 5, temperatura: 55, vazao: 4, pressao: 2 });
   await ate('a primeira fica disponível ao CLP', async () => (await estadoOp(a.numero)) === 'enviada', 10_000);
@@ -180,11 +232,48 @@ try {
   await ate('OP volta a em produção', async () => (await estadoOp(ocupa.numero)) === 'em_producao', 15_000);
   confere(true, 'queda não concluiu a OP e ela voltou ao estado anterior');
 
+  // 6a. alarme: um intertravamento atua no CLP (PSH-103 = código 2 da tabela do contrato)
+  console.log('6a. Alarme no CLP');
+  await mes('POST', '/api/admin/simulador/falha', { falha: 'alarme', alarme: 2 });
+  await ate('alarme na bancada', async () => {
+    const b = await mes('GET', '/api/mes/bancada');
+    return b.alarme === 2 && b.estadoClp === 3;
+  }, 10_000);
+  confere((await mes('GET', '/api/mes/paradas')).sugerido === 'psh103', 'a tela de paradas sugere o motivo do alarme (psh103)');
+  confere((await estadoOp(ocupa.numero)) === 'em_producao', 'alarme não muda o estado da OP');
+  await mes('POST', '/api/admin/simulador/falha', { falha: 'nenhuma' });
+  await ate('alarme encerrado', async () => (await mes('GET', '/api/mes/bancada')).alarme === 0, 10_000);
+  const registros = await mes('GET', '/api/mes/eventos?limite=30');
+  confere(registros.some((e) => e.tipo === 'alarme' && e.detalhe === 'Alarme 2' && e.numeroOp === ocupa.numero)
+    && registros.some((e) => e.tipo === 'alarme_fim' && e.detalhe === 'Alarme 2'), 'início e fim do alarme registrados com o código, na OP em produção');
+  confere((await status(MES, 'POST', '/api/admin/simulador/falha', { falha: 'alarme', alarme: 999 })) === 400, 'alarme fora da tabela é recusado (400)');
+
   // 7. abortada no CLP
   console.log('7. OP abortada no CLP');
   await mes('POST', '/api/admin/simulador/falha', { falha: 'abortar' });
   await ate('OP abortada', async () => (await estadoOp(ocupa.numero)) === 'abortada', 15_000);
   confere(true, 'OP abortada pelo CLP registrada');
+
+  // 7a. "produzir de novo": só quando a OP anterior terminou; repetir não cria outra OP
+  console.log('7a. Produzir de novo');
+  const { pedidoId: pedidoRefazer } = await loja('POST', '/api/loja/pedidos', { cliente: { nome: 'Davi' }, itens: [{ produtoId: porNome('Envase lento').id }] });
+  const itemRefazer = (await loja('GET', `/api/loja/pedidos/${pedidoRefazer}`)).itens[0];
+  await ate('item em produção', async () => (await estadoOp(itemRefazer.numeroOp)) === 'em_producao', 20_000);
+  confere((await status(LOJA, 'POST', `/api/erp/itens/${itemRefazer.id}/refazer`, {})) === 409, 'não refaz um item com a OP em andamento (409)');
+  await mes('POST', '/api/admin/simulador/falha', { falha: 'abortar' });
+  await ate('OP do item abortada', async () => (await estadoOp(itemRefazer.numeroOp)) === 'abortada', 15_000);
+  const refeito = await loja('POST', `/api/erp/itens/${itemRefazer.id}/refazer`, {});
+  confere(refeito.numeroOp > itemRefazer.numeroOp, `item abortado ganha uma OP nova (${itemRefazer.numeroOp} → ${refeito.numeroOp})`);
+  // a mesma emissão de novo, direto no contrato (como a Loja faria se a resposta tivesse se perdido)
+  const repetido = await mes('POST', '/api/ordens', { ordens: [{
+    origem: `loja:item:${itemRefazer.id}`, receita: itemRefazer.receita, tolerancias: itemRefazer.tolerancias, substitui: itemRefazer.numeroOp,
+  }] });
+  confere(repetido.numeros[0] === refeito.numeroOp, 'repetir o "produzir de novo" devolve a mesma OP nova');
+  const opsDoItem = (await mes('GET', '/api/mes/ordens?limite=50')).filter((o) => o.origem === `loja:item:${itemRefazer.id}`);
+  confere(opsDoItem.length === 2 && opsDoItem.filter((o) => !['abortada'].includes(o.situacao.estado)).length === 1,
+    'o item tem duas OPs: a abortada e uma só ativa');
+  await ate('OP nova inspecionada', async () => inspecionada(await estadoOp(refeito.numeroOp)), 60_000);
+  confere((await loja('GET', `/api/loja/pedidos/${pedidoRefazer}`)).itens[0].numeroOp === refeito.numeroOp, 'o item aponta para a OP nova');
 
   // 8. indicadores e relatório
   console.log('8. Indicadores');
@@ -193,21 +282,59 @@ try {
   await mes('POST', `/api/mes/paradas/${parada.id}/encerrar`);
   const ind = await mes('GET', '/api/mes/indicadores');
   // nos indicadores a abortada conta como reprovada (perda de qualidade); o simulador pode reprovar outras
-  confere(ind.produzidas === 5 && ind.aprovadas + ind.reprovadas === 5 && ind.reprovadas >= 1 && ind.abortadas === 1,
-    `contagens (${ind.produzidas} produzidas, ${ind.aprovadas} aprovadas + ${ind.reprovadas} reprovadas, ${ind.abortadas} abortada)`);
+  confere(ind.produzidas === 7 && ind.aprovadas + ind.reprovadas === 7 && ind.reprovadas >= 2 && ind.abortadas === 2,
+    `contagens (${ind.produzidas} produzidas, ${ind.aprovadas} aprovadas + ${ind.reprovadas} reprovadas, ${ind.abortadas} abortadas)`);
   confere(ind.oee !== null && ind.oee > 0 && ind.oee <= 1, `OEE calculado (${(ind.oee * 100).toFixed(1)} %)`);
   confere(ind.tempoParadoMs >= 900, 'parada apontada conta no OEE');
   const csv = await (await fetch(`${MES}/api/mes/relatorio.csv`)).text();
   confere(csv.includes('OEE;') && csv.includes('Resfriar (s)') && csv.split('\r\n').length > 12, 'relatório CSV exportável (com o tempo de resfriar)');
 
+  // 8a. entradas inválidas (corpo vazio, tipos errados): sempre 4xx, nunca 500; e as listas paginam
+  console.log('8a. Entradas inválidas e paginação');
+  const ruins = [
+    [MES, 'POST', '/api/ordens'], [MES, 'POST', '/api/ordens', { ordens: [null, 5] }], [MES, 'POST', '/api/ordens', undefined, '{"ordens": ['],
+    [MES, 'POST', '/api/ordens', undefined, 'null'], [MES, 'POST', '/api/ordens', { ordens: [{ ...ordemTeste, prazo: 1e20 }] }],
+    [MES, 'POST', '/api/ordens/prazos'], [MES, 'GET', '/api/ordens/mudancas?desde=abc'], [MES, 'GET', '/api/ordens/abc'],
+    [MES, 'POST', '/api/mes/ordens'], [MES, 'POST', '/api/mes/ordens', []], [MES, 'POST', `/api/mes/ordens/${manual.numero}/fixar`],
+    [MES, 'POST', '/api/mes/paradas'], [MES, 'POST', '/api/mes/paradas/abc/encerrar'], [MES, 'PUT', '/api/admin/configuracao'],
+    [MES, 'PUT', '/api/admin/configuracao', { driver: 's7', ip: '999.0.0.1' }], [MES, 'POST', '/api/admin/simulador/falha'],
+    [LOJA, 'POST', '/api/loja/pedidos'], [LOJA, 'POST', '/api/loja/pedidos', undefined, 'null'], [LOJA, 'POST', '/api/loja/pedidos', undefined, '{"cliente": '],
+    [LOJA, 'POST', '/api/loja/pedidos', { cliente: { nome: 'Eva' }, itens: [null, { produtoId: 'x' }] }],
+    [LOJA, 'POST', '/api/loja/pedidos', { cliente: { nome: 'Eva' }, itens: [{ produtoId: porNome('Morna').id, quantidade: 1e9 }] }],
+    [LOJA, 'POST', '/api/erp/produtos'], [LOJA, 'PUT', '/api/erp/produtos/abc', {}], [LOJA, 'POST', '/api/erp/itens/abc/refazer'],
+    [LOJA, 'GET', '/api/loja/pedidos/abc'], [LOJA, 'GET', '/api/loja/certificado/0'],
+  ];
+  const respostas = await Promise.all(ruins.map(async ([base, metodo, caminho, corpo, cru]) => ({ caminho: `${metodo} ${caminho}`, s: await status(base, metodo, caminho, corpo, cru) })));
+  const foraDe4xx = respostas.filter((r) => r.s < 400 || r.s > 499);
+  confere(foraDe4xx.length === 0, `${ruins.length} pedidos inválidos, todos recusados com 4xx${foraDe4xx.map((r) => ` [${r.caminho}: ${r.s}]`).join('')}`);
+  const pagina1 = await mes('GET', '/api/mes/eventos?limite=5');
+  const pagina2 = await mes('GET', `/api/mes/eventos?limite=5&antes=${pagina1.at(-1).id}`);
+  confere(pagina1.length === 5 && pagina2.length === 5 && pagina2.every((e) => e.id < pagina1.at(-1).id), 'os registros do MES paginam (limite e antes)');
+  const duasOps = await mes('GET', '/api/mes/ordens?limite=2');
+  const maisDuas = await mes('GET', `/api/mes/ordens?limite=2&antes=${duasOps.at(-1).numero}`);
+  confere(duasOps.length === 2 && duasOps[0].numero > duasOps[1].numero && maisDuas[0].numero < duasOps[1].numero, 'as ordens do MES paginam');
+  const umPedido = await loja('GET', '/api/erp/pedidos?limite=1');
+  const outroPedido = await loja('GET', `/api/erp/pedidos?limite=1&antes=${umPedido.pedidos[0].id}`);
+  confere(umPedido.pedidos.length === 1 && outroPedido.pedidos.length === 1 && outroPedido.pedidos[0].id < umPedido.pedidos[0].id, 'os pedidos da Loja paginam');
+
   // 9. MES fora do ar: a Loja recusa o pedido com erro claro e não grava nada
   if (SEM_DOCKER) {
     console.log('9. MES fora do ar: pulado (--sem-docker)');
+  } else if (!mesDoComposeEhODaUrl()) {
+    console.log('9. MES fora do ar');
+    confere(false, `o contêiner mes do projeto compose em uso não é o MES em ${MES}: nada foi parado (informe o projeto em COMPOSE_PROJECT_NAME, ou use --sem-docker)`);
   } else {
     console.log('9. MES fora do ar (para o contêiner mes e sobe de novo)');
     const antes = (await loja('GET', '/api/erp/pedidos')).pedidos.length;
+    // uma tela aberta (SSE) não pode segurar o encerramento do MES
+    const tela = new AbortController();
+    await fetch(`${MES}/api/eventos`, { signal: tela.signal });
     pararMes = true;
-    execFileSync('docker', ['compose', 'stop', 'mes'], { cwd: RAIZ, stdio: 'ignore' });
+    const inicioParada = Date.now();
+    docker('stop', 'mes');
+    const parada = Date.now() - inicioParada;
+    tela.abort();
+    confere(parada < 8000, `o MES encerra limpo, sem esperar o Docker matar (${(parada / 1000).toFixed(1)} s)`);
     const r = await fetch(`${LOJA}/api/loja/pedidos`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cliente: { nome: 'Caio' }, itens: [{ produtoId: porNome('Morna').id }] }),
@@ -220,7 +347,7 @@ try {
   }
 } finally {
   if (pararMes) {
-    execFileSync('docker', ['compose', 'start', 'mes'], { cwd: RAIZ, stdio: 'ignore' });
+    docker('start', 'mes');
     await ate('MES de volta', async () => (await loja('GET', '/api/saude').catch(() => ({}))).mes === 'ok', 120_000)
       .then(() => confere(true, 'MES de volta no ar'), () => confere(false, 'MES de volta no ar'));
   }

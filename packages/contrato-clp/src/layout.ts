@@ -36,11 +36,12 @@ export const CAMPOS_LEITURA = {
   VidaClp: { byte: 32, tipo: 'Word' },
   /** SeqPedido do último pedido que o CLP recebeu (pegou para produzir). */
   EcoSeq: { byte: 34, tipo: 'Word' },
-  /** Do pedido recebido: 0 aceito, > 0 recusado. */
+  /** Do pedido recebido: 0 aceito, > 0 recusado (tabela RECUSA, em codigos.ts). */
   Resultado: { byte: 36, tipo: 'Int' },
   Estado: { byte: 38, tipo: 'Int' },
   Etapa: { byte: 40, tipo: 'Int' },
   OpExecucao: { byte: 42, tipo: 'DInt' },
+  /** Intertravamento ativo; 0 = nenhum (tabela ALARME, em codigos.ts). */
   Alarme: { byte: 46, tipo: 'Word' },
   /** Última OP que terminou; os campos seguintes são dela. */
   OpConcluida: { byte: 48, tipo: 'DInt' },
@@ -94,9 +95,6 @@ export const ETAPA = {
   /** Recircular o TQ-01 pelo trocador (FV-105, M1) até baixar à temperatura do pedido. */
   resfriar: 6,
 } as const;
-
-/** `Resultado` = 0 é aceito; > 0 é recusa (os motivos ficam com o programa do CLP). */
-export const RESULTADO_ACEITO = 0;
 
 /** `ResultadoOp` da OP concluída. */
 export const RESULTADO_OP = { concluida: 1, abortada: 2 } as const;

@@ -5,9 +5,9 @@
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { criarBanco, criarTabelas, esperarBanco, registrarSistema, registrarTela, registrarTempoReal } from '@aupro/servidor';
-import { ErroMes, criarClienteMes } from './cliente-mes.ts';
-import { TABELAS_ERP, criarErp, semearCatalogo } from './erp.ts';
-import { acompanharMes } from './mudancas.ts';
+import { criarClienteMes } from './cliente-mes.ts';
+import { TABELAS_ERP, criarErp, registrarErros, semearCatalogo } from './erp.ts';
+import { acompanharMes, type EmissoesEmAndamento } from './mudancas.ts';
 
 const PORTA = Number(process.env.PORTA ?? 8080);
 const MES_URL = process.env.MES_URL ?? 'http://localhost:8081';
@@ -22,18 +22,13 @@ const app = Fastify({ logger: { level: process.env.LOG ?? 'warn' } });
 const tempoReal = registrarTempoReal(app);
 const mes = criarClienteMes(MES_URL);
 
-// Erro do MES numa rota: fora do ar vira 503 'mes_fora_do_ar' (a tela traduz); recusa do MES (409, 422) passa adiante.
-app.setErrorHandler((erro, _req, reply) => {
-  if (erro instanceof ErroMes) {
-    return reply.code(erro.status).send({ erro: erro.codigo, ...(erro.dados?.erros ? { erros: erro.dados.erros } : {}) });
-  }
-  reply.log.error(erro);
-  return reply.code((erro as { statusCode?: number }).statusCode ?? 500).send({ erro: 'interno' });
-});
+registrarErros(app);
 
-criarErp(app, banco, mes, tempoReal);
+/** Itens cujo pedido está sendo gravado agora: o acompanhamento do feed espera por eles (mudancas.ts). */
+const emAndamento: EmissoesEmAndamento = new Set();
+criarErp(app, banco, mes, tempoReal, emAndamento);
 registrarSistema(app, 'loja', { url: process.env.MES_URL_PUBLICA, porta: process.env.MES_PORTA_PUBLICA });
-const acompanhamento = acompanharMes({ banco, mes, tempoReal });
+const acompanhamento = acompanharMes({ banco, mes, tempoReal, emAndamento });
 
 /** Saúde da Loja: 503 só se a base dela não responde (o MES fora do ar aparece, mas a Loja continua de pé). */
 app.get('/api/saude', async (_req, reply) => {
@@ -46,14 +41,25 @@ app.get('/api/saude', async (_req, reply) => {
 
 registrarTela(app, TELA);
 
-const encerrar = async () => {
-  acompanhamento.parar();
-  await app.close();
-  await banco.end();
+// Encerramento limpo (docker stop): para o acompanhamento do MES, espera o ciclo em andamento, fecha as conexões
+// das telas e o banco. Se algo não fechar em 8 s, sai assim mesmo (o Docker mata em 10 s).
+let encerrando = false;
+const encerrar = async (sinal: string) => {
+  if (encerrando) return;
+  encerrando = true;
+  console.log(`Loja: encerrando (${sinal})`);
+  setTimeout(() => process.exit(1), 8000).unref();
+  try {
+    await acompanhamento.parar();
+    await app.close();
+    await banco.end();
+  } catch (erro) {
+    console.error('Loja: erro ao encerrar:', erro);
+  }
   process.exit(0);
 };
-process.on('SIGTERM', encerrar);
-process.on('SIGINT', encerrar);
+process.on('SIGTERM', () => void encerrar('SIGTERM'));
+process.on('SIGINT', () => void encerrar('SIGINT'));
 
 await app.listen({ host: '0.0.0.0', port: PORTA });
 acompanhamento.iniciar();

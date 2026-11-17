@@ -4,13 +4,16 @@
 
 import type { FastifyInstance } from 'fastify';
 import { FAIXAS, ORIGEM_LOJA, validarReceita, validarTolerancias, type Andamento, type Receita } from '@aupro/dominio';
-import { emTransacao, executar, inteiroPositivo, linhas, numero, texto, type Banco, type TempoReal } from '@aupro/servidor';
+import { emTransacao, executar, inteiroPositivo, linhas, numero, objeto, pagina, texto, type Banco, type TempoReal } from '@aupro/servidor';
 import { ErroMes, type ClienteMes } from './cliente-mes.ts';
 import { CATALOGO_INICIAL } from './esquema.ts';
+import type { EmissoesEmAndamento } from './mudancas.ts';
 
 export { TABELAS_ERP } from './esquema.ts';
 
 const MAX_UNIDADES = 10;
+/** Maior preço que cabe na coluna (DECIMAL(10,2)). */
+const MAIOR_PRECO = 99_999_999.99;
 
 type LinhaProduto = {
   id: number; nome: string; descricao: string | null; preco: number; volume: number; temperatura: number; vazao: number;
@@ -58,7 +61,23 @@ export async function semearCatalogo(banco: Banco): Promise<void> {
   }
 }
 
-export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, tempoReal: TempoReal) {
+/**
+ * Erros das rotas da Loja. Erro do MES: fora do ar vira 503 'mes_fora_do_ar' (a tela traduz); recusa do MES (409,
+ * 422) passa adiante. Erro do próprio pedido (JSON inválido, corpo grande demais): 4xx, sem barulho no log.
+ */
+export function registrarErros(app: FastifyInstance): void {
+  app.setErrorHandler((erro, _req, reply) => {
+    if (erro instanceof ErroMes) {
+      return reply.code(erro.status).send({ erro: erro.codigo, ...(erro.dados?.erros ? { erros: erro.dados.erros } : {}) });
+    }
+    const status = (erro as { statusCode?: number }).statusCode;
+    if (status !== undefined && status >= 400 && status < 500) return reply.code(status).send({ erro: 'pedido_invalido' });
+    reply.log.error(erro);
+    return reply.code(500).send({ erro: 'interno' });
+  });
+}
+
+export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, tempoReal: TempoReal, emAndamento: EmissoesEmAndamento) {
   /** Itens com o andamento perguntado ao MES; com o MES fora do ar, os itens vêm sem andamento (e `mesNoAr` falso). */
   async function itensComAndamento(itens: LinhaItem[]) {
     let andamento: Andamento[] = [];
@@ -82,21 +101,29 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
   });
 
   app.post('/api/loja/pedidos', async (req, reply) => {
-    const corpo = req.body as {
-      cliente?: { nome?: unknown }; // e-mail e turma, se vierem, são ignorados
-      itens?: { produtoId?: unknown; quantidade?: unknown; receita?: Partial<Receita> }[];
-    };
-    const nome = texto(corpo.cliente?.nome, 80);
+    // corpo vazio ou malformado não quebra a rota: os campos ficam ausentes e a validação responde 422
+    const corpo = objeto(req.body);
+    const nome = texto(objeto(corpo.cliente).nome, 80); // e-mail e turma, se vierem, são ignorados
+    const itens: unknown[] = Array.isArray(corpo.itens) ? corpo.itens : [];
     const erros: { campo: string; codigo: string }[] = [];
     if (!nome) erros.push({ campo: 'cliente.nome', codigo: 'obrigatorio' });
-    if (!Array.isArray(corpo.itens) || corpo.itens.length === 0) erros.push({ campo: 'itens', codigo: 'vazio' });
+    if (itens.length === 0) erros.push({ campo: 'itens', codigo: 'vazio' });
+    // conferido antes de olhar item por item: um pedido absurdo (mil itens, quantidade de um bilhão) não ocupa a Loja
+    if (itens.length > MAX_UNIDADES) erros.push({ campo: 'itens', codigo: 'muitas_unidades' });
     if (erros.length > 0) return reply.code(422).send({ erro: 'pedido_invalido', erros });
 
     // cada unidade é uma batelada
     const unidades: { produto: ReturnType<typeof produtoDe>; receita: Receita }[] = [];
-    for (const [i, it] of corpo.itens!.entries()) {
+    let total = 0;
+    for (const [i, bruto] of itens.entries()) {
+      const it = objeto(bruto);
       const id = inteiroPositivo(it.produtoId);
-      const quantidade = inteiroPositivo(it.quantidade) ?? 1;
+      const quantidade = it.quantidade === undefined || it.quantidade === null ? 1 : inteiroPositivo(it.quantidade);
+      if (quantidade === null) {
+        erros.push({ campo: `itens.${i}.quantidade`, codigo: 'invalido' });
+        continue;
+      }
+      total += quantidade;
       const [l] = id === null ? [] : await linhas<LinhaProduto>(banco, 'SELECT * FROM erp_produto WHERE id = ? AND ativo = 1', [id]);
       if (!l) {
         erros.push({ campo: `itens.${i}.produtoId`, codigo: 'inexistente' });
@@ -105,18 +132,19 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
       const produto = produtoDe(l);
       // sob medida: o cliente escolhe só volume e temperatura; vazão e pressão são sempre as do produto
       // (uma vazão enviada no corpo é ignorada)
+      const pedida = objeto(it.receita);
       const receita: Receita = produto.sobMedida
         ? {
-            volume: numero(it.receita?.volume) ?? Number.NaN,
-            temperatura: numero(it.receita?.temperatura) ?? Number.NaN,
+            volume: numero(pedida.volume) ?? Number.NaN,
+            temperatura: numero(pedida.temperatura) ?? Number.NaN,
             vazao: produto.receita.vazao,
             pressao: produto.receita.pressao,
           }
         : produto.receita;
       for (const e of validarReceita(receita)) erros.push({ campo: `itens.${i}.${e.campo}`, codigo: e.codigo });
-      for (let q = 0; q < quantidade; q++) unidades.push({ produto, receita });
+      if (total <= MAX_UNIDADES) for (let q = 0; q < quantidade; q++) unidades.push({ produto, receita });
     }
-    if (unidades.length > MAX_UNIDADES) erros.push({ campo: 'itens', codigo: 'muitas_unidades' });
+    if (total > MAX_UNIDADES) erros.push({ campo: 'itens', codigo: 'muitas_unidades' });
     if (erros.length > 0) return reply.code(422).send({ erro: 'pedido_invalido', erros });
 
     // um prazo só para o pedido inteiro (o fim estimado do último item): a ordem do carrinho não deve
@@ -125,6 +153,10 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
     const prazos = unidades.map(() => prazoPedido);
     // Tudo numa transação: grava o pedido, o MES emite as OPs (todas ou nenhuma) e cada item guarda o número.
     // Se o MES falhar no meio, a transação volta e não fica pedido pela metade.
+    // A emissão é idempotente pela origem (o item): se a resposta do MES se perder, a Loja repete a chamada e recebe
+    // as mesmas OPs (cliente-mes.ts). Se desistir, o pedido é desfeito e as OPs que o MES tenha criado ficam sem
+    // item: o acompanhamento do feed as cancela (mudancas.ts). Enquanto isso, os itens ficam "em andamento".
+    const emEmissao: number[] = [];
     const { pedidoId } = await emTransacao(banco, async (c) => {
       // só o nome identifica o cliente; dois alunos podem ter o mesmo nome, então cada pedido tem o seu cliente
       const { insertId: clienteId } = await executar(c, 'INSERT INTO erp_cliente (nome) VALUES (?)', [nome]);
@@ -139,6 +171,8 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
             u.receita.pressao, u.produto.tolerancias.temperatura, u.produto.tolerancias.volume, new Date(prazos[i])],
         );
         itemIds.push(r.insertId);
+        emAndamento.add(r.insertId);
+        emEmissao.push(r.insertId);
       }
       // o ERP emite uma ordem de produção por unidade
       const { numeros } = await mes.emitirOrdens(unidades.map((u, i) => ({
@@ -152,6 +186,9 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
         throw erro;
       }
       return { pedidoId: pedido.insertId };
+    }).finally(() => {
+      // gravado ou desfeito, o feed já pode decidir sobre estes itens
+      for (const id of emEmissao) emAndamento.delete(id);
     });
     tempoReal.publicar('pedido', { pedidoId });
     return reply.code(201).send({ pedidoId });
@@ -193,10 +230,14 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
 
   // ---------------- Pedidos (vendas) ----------------
 
-  app.get('/api/erp/pedidos', async () => {
+  /** Os pedidos, do mais recente ao mais antigo: `?limite=` (até 200) e `?antes=<id>` paginam. */
+  app.get('/api/erp/pedidos', async (req) => {
+    const { limite, antes } = pagina(req.query, 200, 200);
     const pedidos = await linhas<{ id: number; criado_em: Date; nome: string; email: string | null; turma: string | null }>(
       banco,
-      'SELECT p.id, p.criado_em, c.nome, c.email, c.turma FROM erp_pedido p JOIN erp_cliente c ON c.id = p.cliente_id ORDER BY p.id DESC LIMIT 200',
+      `SELECT p.id, p.criado_em, c.nome, c.email, c.turma FROM erp_pedido p JOIN erp_cliente c ON c.id = p.cliente_id
+       WHERE p.id < ? ORDER BY p.id DESC LIMIT ?`,
+      [antes ?? Number.MAX_SAFE_INTEGER, limite],
     );
     const itens = pedidos.length === 0 ? [] : await linhas<LinhaItem>(banco, 'SELECT * FROM erp_item WHERE pedido_id IN (?) ORDER BY id', [
       pedidos.map((p) => p.id),
@@ -222,7 +263,11 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
     return r;
   });
 
-  /** Batelada reprovada, recusada ou abortada: o ERP emite nova OP para o mesmo item. */
+  /**
+   * Batelada reprovada, recusada ou abortada: o ERP emite nova OP para o mesmo item, no lugar da anterior
+   * (`substitui`). O MES só cria a nova se a anterior terminou: o item nunca fica com duas OPs ativas, e repetir
+   * este pedido (clique duplo, resposta perdida) devolve a mesma OP nova em vez de criar outra.
+   */
   app.post('/api/erp/itens/:id/refazer', async (req, reply) => {
     const id = inteiroPositivo((req.params as { id: string }).id);
     const [l] = id === null ? [] : await linhas<LinhaItem>(banco, 'SELECT * FROM erp_item WHERE id = ?', [id]);
@@ -232,19 +277,22 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
     const item = itemDe(l);
     const [prazo] = await mes.estimarPrazos([item.receita]);
     const { numeros: [numeroOp] } = await mes.emitirOrdens([
-      { origem: `${ORIGEM_LOJA}${item.id}`, receita: item.receita, tolerancias: item.tolerancias, prazo, autor: null },
+      { origem: `${ORIGEM_LOJA}${item.id}`, receita: item.receita, tolerancias: item.tolerancias, prazo, autor: null, substitui: l.numero_op },
     ]);
     await executar(banco, 'UPDATE erp_item SET numero_op = ?, prazo = ? WHERE id = ?', [numeroOp, new Date(prazo), item.id]);
     tempoReal.publicar('pedido', { pedidoId: item.pedidoId });
     return { numeroOp };
   });
 
-  app.get('/api/erp/faturas', async () => {
+  /** As faturas, da mais recente à mais antiga: `?limite=` (até 500) e `?antes=<id>` paginam. */
+  app.get('/api/erp/faturas', async (req) => {
+    const { limite, antes } = pagina(req.query, 500, 500);
     const r = await linhas<{ id: number; numero_op: number; valor: number; emitida_em: Date; nome_produto: string; pedido_id: number; nome: string; email: string | null }>(
       banco,
       `SELECT f.id, f.numero_op, f.valor, f.emitida_em, i.nome_produto, i.pedido_id, c.nome, c.email FROM erp_fatura f
        JOIN erp_item i ON i.id = f.item_id JOIN erp_pedido p ON p.id = i.pedido_id JOIN erp_cliente c ON c.id = p.cliente_id
-       ORDER BY f.id DESC`,
+       WHERE f.id < ? ORDER BY f.id DESC LIMIT ?`,
+      [antes ?? Number.MAX_SAFE_INTEGER, limite],
     );
     return r.map((f) => ({
       id: f.id, numeroOp: f.numero_op, valor: f.valor, emitidaEm: f.emitida_em.getTime(), produto: f.nome_produto,
@@ -252,7 +300,13 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
     }));
   });
 
-  app.get('/api/erp/clientes', async () => linhas(banco, 'SELECT id, nome, email, turma FROM erp_cliente ORDER BY nome'));
+  /** Os clientes (um por pedido), do mais recente ao mais antigo: `?limite=` (até 500) e `?antes=<id>` paginam. */
+  app.get('/api/erp/clientes', async (req) => {
+    const { limite, antes } = pagina(req.query, 500, 500);
+    return linhas(banco, 'SELECT id, nome, email, turma FROM erp_cliente WHERE id < ? ORDER BY id DESC LIMIT ?', [
+      antes ?? Number.MAX_SAFE_INTEGER, limite,
+    ]);
+  });
 
   // ---------------- Catálogo (professor) ----------------
 
@@ -268,14 +322,14 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
       ...validarTolerancias(tolerancias).map((e) => ({ campo: e.campo, codigo: e.codigo })),
     ];
     if (!nome) erros.push({ campo: 'nome', codigo: 'obrigatorio' });
-    if (preco === null || preco < 0) erros.push({ campo: 'preco', codigo: 'invalido' });
+    if (preco === null || preco < 0 || preco > MAIOR_PRECO) erros.push({ campo: 'preco', codigo: 'invalido' });
     const valores = [nome, texto(c.descricao), preco, receita.volume, receita.temperatura, receita.vazao, receita.pressao,
       tolerancias.temperatura, tolerancias.volume, c.sobMedida === true ? 1 : 0, c.ativo === false ? 0 : 1];
     return { erros, valores };
   }
 
   app.post('/api/erp/produtos', async (req, reply) => {
-    const { erros, valores } = produtoValido(req.body as Record<string, unknown>);
+    const { erros, valores } = produtoValido(objeto(req.body));
     if (erros.length > 0) return reply.code(422).send({ erro: 'produto_invalido', erros });
     const r = await executar(
       banco,
@@ -288,7 +342,7 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
 
   app.put('/api/erp/produtos/:id', async (req, reply) => {
     const id = inteiroPositivo((req.params as { id: string }).id);
-    const { erros, valores } = produtoValido(req.body as Record<string, unknown>);
+    const { erros, valores } = produtoValido(objeto(req.body));
     if (id === null) return reply.code(404).send({ erro: 'produto_inexistente' });
     if (erros.length > 0) return reply.code(422).send({ erro: 'produto_invalido', erros });
     const r = await executar(
@@ -306,7 +360,10 @@ export function criarErp(app: FastifyInstance, banco: Banco, mes: ClienteMes, te
    */
   app.post('/api/admin/reiniciar', async () => {
     await mes.reiniciar();
-    for (const t of ['erp_fatura', 'erp_item', 'erp_pedido', 'erp_cliente']) await executar(banco, `DELETE FROM ${t}`);
+    // tudo ou nada: não fica fatura sem item nem pedido sem cliente se o banco falhar no meio
+    await emTransacao(banco, async (c) => {
+      for (const t of ['erp_fatura', 'erp_item', 'erp_pedido', 'erp_cliente']) await executar(c, `DELETE FROM ${t}`);
+    });
     tempoReal.publicar('reiniciado', {});
     return { ok: true };
   });

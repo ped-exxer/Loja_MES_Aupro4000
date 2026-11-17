@@ -2,6 +2,7 @@
 // mes_ordem.numero nunca é reaproveitado (reiniciar a aula apaga com DELETE, não TRUNCATE): o CLP pode ainda
 // ter no DB o número de uma OP antiga.
 
+import { ALARME } from '@aupro/contrato-clp';
 import { executar, linhas, type Banco } from '@aupro/servidor';
 
 export const TABELAS_MES = [
@@ -19,12 +20,14 @@ export const TABELAS_MES = [
     fixada INT NULL,
     estado VARCHAR(24) NOT NULL,
     antes_da_queda VARCHAR(24) NULL,
+    recusa INT NULL, -- código de Resultado com que o CLP recusou a OP (tabela RECUSA do contrato)
     cancelar_ao_retirar TINYINT NOT NULL DEFAULT 0,
     enviada_em DATETIME(3) NULL,
     recebida_em DATETIME(3) NULL,
     concluida_em DATETIME(3) NULL,
     autor VARCHAR(80) NULL,
-    INDEX (estado)
+    INDEX (estado),
+    INDEX idx_origem (origem)
   )`,
   `CREATE TABLE IF NOT EXISTS mes_batelada (
     numero_op INT PRIMARY KEY,
@@ -84,12 +87,15 @@ export const TABELAS_MES = [
 ];
 
 /**
- * Colunas que entraram depois de a tabela existir (o MySQL não tem ADD COLUMN IF NOT EXISTS): confere no
+ * Colunas e índices que entraram depois de a tabela existir (o MySQL não tem ADD COLUMN IF NOT EXISTS): confere no
  * information_schema e só então acrescenta. Pode rodar a cada partida.
  */
 export async function atualizarEsquema(banco: Banco): Promise<void> {
-  const novas = [{ tabela: 'mes_batelada', coluna: 't_resfriar', definicao: 'INT NOT NULL DEFAULT 0 AFTER t_devolver' }];
-  for (const n of novas) {
+  const colunas = [
+    { tabela: 'mes_batelada', coluna: 't_resfriar', definicao: 'INT NOT NULL DEFAULT 0 AFTER t_devolver' },
+    { tabela: 'mes_ordem', coluna: 'recusa', definicao: 'INT NULL AFTER antes_da_queda' },
+  ];
+  for (const n of colunas) {
     const [{ existe }] = await linhas<{ existe: number }>(
       banco,
       'SELECT COUNT(*) AS existe FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
@@ -97,12 +103,34 @@ export async function atualizarEsquema(banco: Banco): Promise<void> {
     );
     if (Number(existe) === 0) await executar(banco, `ALTER TABLE ${n.tabela} ADD COLUMN ${n.coluna} ${n.definicao}`);
   }
+  // a emissão de ordens procura a OP mais recente da mesma origem (idempotência)
+  const indices = [{ tabela: 'mes_ordem', indice: 'idx_origem', colunas: 'origem' }];
+  for (const n of indices) {
+    const [{ existe }] = await linhas<{ existe: number }>(
+      banco,
+      'SELECT COUNT(*) AS existe FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?',
+      [n.tabela, n.indice],
+    );
+    if (Number(existe) === 0) await executar(banco, `ALTER TABLE ${n.tabela} ADD INDEX ${n.indice} (${n.colunas})`);
+  }
 }
 
+/**
+ * Motivos de parada apontados na tela da Bancada. Só os códigos: a tela traduz (`motivoParada.<código>`).
+ * Há um motivo para cada intertravamento que o CLP publica em `Alarme` (MOTIVO_DO_ALARME).
+ */
 export const MOTIVOS_PARADA = [
   'emergencia',
-  'falta_agua',
+  'falta_agua', // LSL do reservatório
   'psh103',
+  'tsh104',
+  'lsl104',
+  'fsl102',
+  'lsh101',
+  'lsl101',
+  'falta_ar', // PTT-106
+  'falha_b1', // inversor FY-102
+  'falha_m1', // inversor FY-105
   'troca_turno',
   'manutencao',
   'setup',
@@ -110,3 +138,18 @@ export const MOTIVOS_PARADA = [
   'outro',
 ] as const;
 export type MotivoParada = (typeof MOTIVOS_PARADA)[number];
+
+/** Código de `Alarme` (tabela ALARME do contrato do CLP) → motivo de parada que a tela sugere ao apontar. */
+export const MOTIVO_DO_ALARME: { readonly [codigo: number]: MotivoParada } = {
+  [ALARME.emergencia]: 'emergencia',
+  [ALARME.pressaoAltaTq01]: 'psh103',
+  [ALARME.temperaturaAltaTq01]: 'tsh104',
+  [ALARME.nivelBaixoTq01]: 'lsl104',
+  [ALARME.semVazaoB1]: 'fsl102',
+  [ALARME.nivelBaixoReservatorio]: 'falta_agua',
+  [ALARME.nivelAltoTq02]: 'lsh101',
+  [ALARME.nivelBaixoTq02]: 'lsl101',
+  [ALARME.faltaArInstrumento]: 'falta_ar',
+  [ALARME.falhaInversorB1]: 'falha_b1',
+  [ALARME.falhaInversorM1]: 'falha_m1',
+};

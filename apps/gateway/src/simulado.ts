@@ -7,28 +7,41 @@
 // Entre as rodadas a B1 repõe o TQ-01 com água do reservatório. Os tempos vêm de PARAMETROS_CICLO (provisórios).
 
 import {
+  ALARME,
   AREA_ESCRITA,
   AREA_LEITURA,
   AREA_ASSINATURA,
   ESTADO_CLP,
   ETAPA,
   NENHUM_PEDIDO,
+  RESULTADO_ACEITO,
   RESULTADO_OP,
   TAMANHO_DB,
   TEMPO_VIDA_MS,
   codificarAssinatura,
   codificarLeitura,
   decodificarEscrita,
+  nomeAlarme,
   proximoWord,
+  recusaPorFaixa,
   type ValoresLeitura,
 } from '@aupro/contrato-clp';
 import { PARAMETROS_CICLO, dividirEmRodadas, validarReceita, type Receita } from '@aupro/dominio';
 import type { DbsEncontrados, Driver, Processo } from './driver.ts';
 
-export type FalhaSimulada = 'nenhuma' | 'congelar' | 'abortar';
+/**
+ * Falhas para a aula e para os testes:
+ * - `congelar`: o CLP para (STOP): a vida não anda;
+ * - `abortar`: a batelada em produção termina como abortada;
+ * - `alarme`: um intertravamento atua (`alarme`, padrão PSH-103): o CLP publica o código em `Alarme`, fica "em
+ *   falha", a batelada fica parada onde está e nenhum pedido novo é pego, até voltar a `nenhuma`.
+ */
+export type FalhaSimulada = 'nenhuma' | 'congelar' | 'abortar' | 'alarme';
+export const FALHAS_SIMULADAS: readonly FalhaSimulada[] = ['nenhuma', 'congelar', 'abortar', 'alarme'];
 
-/** Recusa do simulador quando a receita está fora das faixas. */
-export const RECUSA_FORA_DA_FAIXA = 1;
+/** O código serve para a falha `alarme`? (um alarme da tabela, fora o "nenhum") */
+export const alarmeSimulavel = (codigo: unknown): codigo is number =>
+  typeof codigo === 'number' && codigo !== ALARME.nenhum && nomeAlarme(codigo) !== null;
 
 const VOLUME_RESERVATORIO_L = 50;
 /** Constante de tempo da perda de calor do reservatório para o ambiente. */
@@ -71,6 +84,8 @@ export class ClpSimulado {
   readonly db = new Uint8Array(TAMANHO_DB);
   escala: number;
   falha: FalhaSimulada = 'nenhuma';
+  /** Intertravamento publicado enquanto a falha é `alarme`. */
+  alarme: number = ALARME.pressaoAltaTq01;
 
   private aleatorio: () => number;
   private leitura: ValoresLeitura = {
@@ -116,23 +131,25 @@ export class ClpSimulado {
       this.encerrar(RESULTADO_OP.abortada);
       this.falha = 'nenhuma';
     }
+    // intertravamento ativo: a bancada fica em falha, com a batelada parada onde está
+    const emFalha = this.falha === 'alarme';
+    this.leitura.Alarme = emFalha ? this.alarme : ALARME.nenhum;
 
-    // Livre: pega o pedido disponível (cópia e eco no mesmo ciclo). Sem vida do MES, não pega pedido novo.
+    // Livre: pega o pedido disponível (cópia e eco no mesmo ciclo). Sem vida do MES ou em falha, não pega pedido
+    // novo: o pedido continua disponível e é pego quando a falha passar.
     const mesVivo = this.semVidaMesMs < TEMPO_VIDA_MS;
-    if (!this.batelada && mesVivo && escrita.SeqPedido !== this.leitura.EcoSeq && escrita.NumeroOp !== NENHUM_PEDIDO) {
+    if (!this.batelada && !emFalha && mesVivo && escrita.SeqPedido !== this.leitura.EcoSeq && escrita.NumeroOp !== NENHUM_PEDIDO) {
       const receita: Receita = {
         volume: escrita.SpVolume, temperatura: escrita.SpTemperatura, vazao: escrita.SpVazao, pressao: escrita.SpPressao,
       };
       this.leitura.EcoSeq = escrita.SeqPedido;
-      if (validarReceita(receita).length > 0) {
-        this.leitura.Resultado = RECUSA_FORA_DA_FAIXA;
-      } else {
-        this.leitura.Resultado = 0;
-        this.iniciar(escrita.NumeroOp, receita);
-      }
+      // dupla checagem das faixas: o motivo da recusa vai em Resultado (tabela RECUSA do contrato)
+      this.leitura.Resultado = recusaPorFaixa(validarReceita(receita).map((e) => e.campo as keyof Receita));
+      if (this.leitura.Resultado === RESULTADO_ACEITO) this.iniciar(escrita.NumeroOp, receita);
     }
 
-    if (this.batelada) this.avancar(dtS, dtMs);
+    if (this.batelada && !emFalha) this.avancar(dtS, dtMs);
+    this.leitura.Estado = emFalha ? ESTADO_CLP.emFalha : this.batelada ? ESTADO_CLP.emProducao : ESTADO_CLP.ocioso;
     this.publicar();
   }
 
@@ -154,7 +171,6 @@ export class ClpSimulado {
     };
     this.processo.temperatura = this.temperaturaReservatorio; // o TQ-01 está cheio com água do reservatório
     this.leitura.OpExecucao = numeroOp;
-    this.leitura.Estado = ESTADO_CLP.emProducao;
   }
 
   /** Começo de uma rodada: aquece, resfria ou, se a água já está na temperatura, transfere direto. */
@@ -260,7 +276,6 @@ export class ClpSimulado {
     l.OpConcluida = b.numeroOp; // por último, como o programa do CLP deve fazer
     l.OpExecucao = 0;
     l.Etapa = ETAPA.nenhuma;
-    l.Estado = ESTADO_CLP.ocioso;
 
     this.batelada = null;
     p.nivel = 0;

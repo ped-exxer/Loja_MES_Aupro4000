@@ -12,6 +12,9 @@ import {
   VALORES_ASSINATURA,
   type Campo,
 } from './layout.ts';
+import { tabelaAlarmes, tabelaRecusas } from './codigos.ts';
+
+const codigos = (tabela: { codigo: number; tia: string }[]) => tabela.map((c) => `${c.codigo} ${c.tia}`).join(', ');
 
 const COMENTARIOS: Record<string, string> = {
   VidaMes: 'MES soma 1 a cada ciclo',
@@ -23,11 +26,11 @@ const COMENTARIOS: Record<string, string> = {
   SpPressao: 'bar no TQ-01',
   VidaClp: 'CLP soma 1 a cada ciclo',
   EcoSeq: 'SeqPedido do ultimo pedido recebido (copiar no mesmo ciclo em que pega o pedido)',
-  Resultado: 'do pedido recebido: 0 aceito, >0 recusado',
+  Resultado: `do pedido recebido: ${codigos(tabelaRecusas())}`,
   Estado: '0 ocioso, 1 em producao, 2 parada, 3 em falha',
   Etapa: '0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver, 6 resfriar',
   OpExecucao: 'OP em producao (0 = nenhuma)',
-  Alarme: 'codigo do ultimo alarme/intertravamento',
+  Alarme: `intertravamento ativo (o de menor codigo): ${codigos(tabelaAlarmes())}`,
   OpConcluida: 'ultima OP terminada: gravar POR ULTIMO, depois dos campos abaixo',
   ResultadoOp: '1 concluida, 2 abortada',
   VolumeProduzido: 'L no TQ-02 (LIT-101) no fim da transferencia',

@@ -55,13 +55,15 @@ export async function lerConfiguracao(banco: Banco): Promise<Configuracao> {
 export type ErroConfiguracao = { campo: string; codigo: 'invalido' };
 
 /** Valida e normaliza o que veio da tela de Configuração. */
-export function validarConfiguracao(c: Partial<Configuracao>): { ok: true; valor: Omit<Configuracao, 'inicioAula'> } | { ok: false; erros: ErroConfiguracao[] } {
+export function validarConfiguracao(c: Partial<Record<keyof Configuracao, unknown>>): { ok: true; valor: Omit<Configuracao, 'inicioAula'> } | { ok: false; erros: ErroConfiguracao[] } {
   const erros: ErroConfiguracao[] = [];
   const inteiro = (campo: string, v: unknown, min: number, max: number) => {
     if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) erros.push({ campo, codigo: 'invalido' });
   };
   if (c.driver !== 'simulado' && c.driver !== 's7') erros.push({ campo: 'driver', codigo: 'invalido' });
-  if (typeof c.ip !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(c.ip)) erros.push({ campo: 'ip', codigo: 'invalido' });
+  if (typeof c.ip !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(c.ip) || c.ip.split('.').some((o) => Number(o) > 255)) {
+    erros.push({ campo: 'ip', codigo: 'invalido' });
+  }
   inteiro('rack', c.rack, 0, 7);
   inteiro('slot', c.slot, 0, 31);
   inteiro('numeroDb', c.numeroDb, 1, 59999);
@@ -71,7 +73,15 @@ export function validarConfiguracao(c: Partial<Configuracao>): { ok: true; valor
   }
   inteiro('margemPrazoMin', c.margemPrazoMin, 0, 24 * 60);
   if (erros.length > 0) return { ok: false, erros };
-  return { ok: true, valor: c as Omit<Configuracao, 'inicioAula'> };
+  // só os campos da configuração: o que mais vier no corpo é ignorado
+  const v = c as Omit<Configuracao, 'inicioAula'>;
+  return {
+    ok: true,
+    valor: {
+      driver: v.driver, ip: v.ip, rack: v.rack, slot: v.slot, numeroDb: v.numeroDb, numeroDbProcesso: v.numeroDbProcesso,
+      escalaSimulador: v.escalaSimulador, margemPrazoMin: v.margemPrazoMin,
+    },
+  };
 }
 
 export async function salvarConfiguracao(banco: Banco, c: Omit<Configuracao, 'inicioAula'>): Promise<void> {

@@ -51,6 +51,7 @@ export function registrarTela(app: FastifyInstance, pasta: string): void {
     return reply
       .type(TIPOS[extname(arquivo)] ?? 'application/octet-stream')
       .header('cache-control', cache)
+      .header('x-content-type-options', 'nosniff')
       .send(await readFile(arquivo));
   });
 }

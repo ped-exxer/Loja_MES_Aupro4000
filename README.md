@@ -32,4 +32,18 @@ npm install
 npm test                         # domínio, contrato do CLP, simulador, servidor, Loja
 npm run tipos                    # checagem de tipos
 npm run ponta-a-ponta -- http://localhost:8080 http://localhost:8081   # pilha no ar, simulador (reinicia a aula)
+npm run manuais                  # gera os PDFs dos manuais de docs/ em docs/pdf/
 ```
+
+- **Outras portas** (a 8080 ou a 8081 já em uso no PC): `PORTA_LOJA=8090 PORTA_MES=8091 docker compose up -d --build`
+  e passe os mesmos endereços ao `ponta-a-ponta`. Uma pilha de teste ao lado da padrão sobe com outro nome de
+  projeto (`docker compose -p <nome> up`); informe o mesmo nome em `COMPOSE_PROJECT_NAME` ao rodar o teste.
+- **Telas:** claro e escuro (botão no topo; sem escolha, segue o sistema operacional), pt, en e es, do celular ao
+  projetor da sala. Sem biblioteca de componentes nem arquivo de CDN: o comum fica em `packages/interface`.
+- **Códigos de alarme e de recusa do CLP:** só em `packages/contrato-clp/src/codigos.ts` (tabela no
+  [programa do CLP](docs/programa-clp.md), seção 6). As APIs devolvem o código (`bancada.alarme`, `ordem.recusa`);
+  o texto é das telas (`alarme` e `recusa` nos arquivos de i18n).
+- **Falhas do simulador** (tela Bancada do MES, só com o driver simulado): congelar o CLP, abortar a batelada,
+  simular um alarme (PSH-103) e voltar ao normal.
+- O driver `s7` é testado contra um servidor S7 de teste (`apps/gateway/src/teste/`), uma imitação: não vale como
+  prova numa CPU.

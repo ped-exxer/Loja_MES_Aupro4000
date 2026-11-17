@@ -22,6 +22,7 @@ type LinhaOrdem = {
   fixada: number | null;
   estado: EstadoOp;
   antes_da_queda: EstadoComCLP | null;
+  recusa: number | null;
   cancelar_ao_retirar: number;
   enviada_em: Date | null;
   recebida_em: Date | null;
@@ -44,6 +45,7 @@ function ordemDe(l: LinhaOrdem): Ordem {
       l.estado === 'comunicacao_perdida'
         ? { estado: 'comunicacao_perdida', antesDaQueda: l.antes_da_queda ?? 'em_producao' }
         : { estado: l.estado },
+    recusa: l.recusa ?? null,
     cancelarAoRetirar: l.cancelar_ao_retirar === 1,
     enviadaEm: ms(l.enviada_em),
     recebidaEm: ms(l.recebida_em),
@@ -71,11 +73,40 @@ export async function buscarOrdem(c: Conexao, numero: number): Promise<Ordem | n
   return l ? ordemDe(l) : null;
 }
 
-export async function listarOrdens(c: Conexao, estados?: readonly EstadoOp[]): Promise<Ordem[]> {
-  const r = estados
-    ? await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem WHERE estado IN (?) ORDER BY numero', [estados])
-    : await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem ORDER BY numero');
-  return r.map(ordemDe);
+/** Todas as ordens nesses estados, em ordem de número. Para os estados em que a lista é curta (a fila, as com o CLP). */
+export async function listarOrdens(c: Conexao, estados: readonly EstadoOp[]): Promise<Ordem[]> {
+  if (estados.length === 0) return [];
+  return (await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem WHERE estado IN (?) ORDER BY numero', [estados])).map(ordemDe);
+}
+
+/** As ordens mais recentes primeiro, uma página por vez (a lista de todas as ordens cresce sem fim). */
+export async function listarOrdensRecentes(
+  c: Conexao,
+  p: { estados?: readonly string[]; limite: number; antes: number | null },
+): Promise<Ordem[]> {
+  const filtros: string[] = [];
+  const valores: unknown[] = [];
+  if (p.estados && p.estados.length > 0) {
+    filtros.push('estado IN (?)');
+    valores.push(p.estados);
+  }
+  if (p.antes !== null) {
+    filtros.push('numero < ?');
+    valores.push(p.antes);
+  }
+  const onde = filtros.length > 0 ? `WHERE ${filtros.join(' AND ')}` : '';
+  return (await linhas<LinhaOrdem>(c, `SELECT * FROM mes_ordem ${onde} ORDER BY numero DESC LIMIT ?`, [...valores, p.limite])).map(ordemDe);
+}
+
+/** As ordens que chegaram desde `desde` (relatório da aula), em ordem de número. */
+export async function ordensDesde(c: Conexao, desde: number): Promise<Ordem[]> {
+  return (await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem WHERE chegada >= ? ORDER BY numero', [new Date(desde)])).map(ordemDe);
+}
+
+/** A OP mais recente com esta origem (a emissão é idempotente pela origem). */
+export async function ultimaOrdemDaOrigem(c: Conexao, origem: string): Promise<Ordem | null> {
+  const [l] = await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem WHERE origem = ? ORDER BY numero DESC LIMIT 1', [origem]);
+  return l ? ordemDe(l) : null;
 }
 
 export async function buscarOrdens(c: Conexao, numeros: readonly number[]): Promise<Ordem[]> {
@@ -96,6 +127,11 @@ export async function salvarSituacao(c: Conexao, numero: number, s: SituacaoOp):
   ]);
 }
 
+/** Guarda o código de `Resultado` com que o CLP recusou a OP. */
+export async function marcarRecusa(c: Conexao, numero: number, codigo: number): Promise<void> {
+  await executar(c, 'UPDATE mes_ordem SET recusa = ? WHERE numero = ?', [codigo, numero]);
+}
+
 export async function marcarCancelarAoRetirar(c: Conexao, numero: number): Promise<void> {
   await executar(c, 'UPDATE mes_ordem SET cancelar_ao_retirar = 1 WHERE numero = ?', [numero]);
 }
@@ -113,15 +149,31 @@ export async function registrarEvento(
   ]);
 }
 
-export async function eventos(c: Conexao, numeroOp?: number, limite = 200): Promise<Evento[]> {
-  const r = await linhas<{ horario: Date; numero_op: number | null; tipo: string; detalhe: string | null; autor: string | null }>(
-    c,
-    numeroOp === undefined
-      ? 'SELECT * FROM mes_evento ORDER BY id DESC LIMIT ?'
-      : 'SELECT * FROM mes_evento WHERE numero_op = ? ORDER BY id LIMIT ?',
-    numeroOp === undefined ? [limite] : [numeroOp, limite],
+/** O último registro de começo ou de fim de alarme (para o despacho saber se há um alarme já registrado como ativo). */
+export async function ultimoEventoDeAlarme(c: Conexao): Promise<{ tipo: string; detalhe: string | null } | null> {
+  const [l] = await linhas<{ tipo: string; detalhe: string | null }>(
+    c, "SELECT tipo, detalhe FROM mes_evento WHERE tipo IN ('alarme', 'alarme_fim') ORDER BY id DESC LIMIT 1",
   );
-  return r.map((l) => ({ horario: l.horario.getTime(), numeroOp: l.numero_op, tipo: l.tipo, detalhe: l.detalhe, autor: l.autor }));
+  return l ?? null;
+}
+
+type LinhaEvento = { id: number; horario: Date; numero_op: number | null; tipo: string; detalhe: string | null; autor: string | null };
+
+const eventoDe = (l: LinhaEvento): Evento => ({
+  id: Number(l.id), horario: l.horario.getTime(), numeroOp: l.numero_op, tipo: l.tipo, detalhe: l.detalhe, autor: l.autor,
+});
+
+/** Eventos de uma OP, do mais antigo ao mais novo (os primeiros `limite`). */
+export async function eventosDaOrdem(c: Conexao, numeroOp: number, limite = 200): Promise<Evento[]> {
+  return (await linhas<LinhaEvento>(c, 'SELECT * FROM mes_evento WHERE numero_op = ? ORDER BY id LIMIT ?', [numeroOp, limite])).map(eventoDe);
+}
+
+/** Últimos eventos do MES, do mais novo ao mais antigo, uma página por vez (`antes` = id do último da página anterior). */
+export async function eventosRecentes(c: Conexao, p: { limite: number; antes: number | null }): Promise<Evento[]> {
+  const r = p.antes === null
+    ? await linhas<LinhaEvento>(c, 'SELECT * FROM mes_evento ORDER BY id DESC LIMIT ?', [p.limite])
+    : await linhas<LinhaEvento>(c, 'SELECT * FROM mes_evento WHERE id < ? ORDER BY id DESC LIMIT ?', [p.antes, p.limite]);
+  return r.map(eventoDe);
 }
 
 type LinhaBatelada = {
@@ -152,6 +204,11 @@ export async function inserirBatelada(c: Conexao, b: Omit<Batelada, 'registradaE
   );
 }
 
+export async function buscarBateladas(c: Conexao, numeros: readonly number[]): Promise<Batelada[]> {
+  if (numeros.length === 0) return [];
+  return (await linhas<LinhaBatelada>(c, 'SELECT * FROM mes_batelada WHERE numero_op IN (?)', [numeros])).map(bateladaDe);
+}
+
 export async function buscarBatelada(c: Conexao, numeroOp: number): Promise<Batelada | null> {
   const [l] = await linhas<LinhaBatelada>(c, 'SELECT * FROM mes_batelada WHERE numero_op = ?', [numeroOp]);
   return l ? bateladaDe(l) : null;
@@ -175,9 +232,17 @@ export async function inserirLeitura(c: Conexao, numeroOp: number, a: Omit<Amost
   );
 }
 
-export async function leituras(c: Conexao, numeroOp: number): Promise<Amostra[]> {
+/**
+ * Série temporal de uma OP, em ordem. Uma batelada normal tem algumas centenas de amostras (uma a cada 2 s); uma
+ * que ficou horas parada na bancada teria milhares: aí valem as `limite` mais recentes.
+ */
+export async function leituras(c: Conexao, numeroOp: number, limite = 3000): Promise<Amostra[]> {
   const r = await linhas<{ horario: Date; temperatura: number; nivel: number; pressao: number; vazao: number }>(
-    c, 'SELECT horario, temperatura, nivel, pressao, vazao FROM mes_leitura WHERE numero_op = ? ORDER BY id', [numeroOp],
+    c,
+    `SELECT horario, temperatura, nivel, pressao, vazao FROM
+       (SELECT id, horario, temperatura, nivel, pressao, vazao FROM mes_leitura WHERE numero_op = ? ORDER BY id DESC LIMIT ?) ultimas
+     ORDER BY id`,
+    [numeroOp, limite],
   );
   return r.map((l) => ({ ...l, horario: l.horario.getTime() }));
 }
@@ -203,8 +268,9 @@ export async function encerrarParada(c: Conexao, id: number): Promise<boolean> {
   return r.affectedRows === 1;
 }
 
+/** Uma inspeção por OP: repetir (retomada depois de uma falha) não duplica nem dá erro. */
 export async function inserirInspecao(c: Conexao, i: Omit<Inspecao, 'horario'>): Promise<void> {
-  await executar(c, 'INSERT INTO mes_inspecao (numero_op, resultado, observacao, autor, horario) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(3))', [
+  await executar(c, 'INSERT IGNORE INTO mes_inspecao (numero_op, resultado, observacao, autor, horario) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(3))', [
     i.numeroOp, i.resultado, i.observacao, i.autor,
   ]);
 }

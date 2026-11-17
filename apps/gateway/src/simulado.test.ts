@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ALARME,
   AREA_ESCRITA,
   AREA_LEITURA,
   AREA_ASSINATURA,
+  ESTADO_CLP,
   ETAPA,
+  RECUSA,
   RESULTADO_OP,
   codificarEscrita,
   conferirAssinatura,
@@ -12,7 +15,7 @@ import {
   type ValoresEscrita,
 } from '@aupro/contrato-clp';
 import { estimarEtapas } from '@aupro/dominio';
-import { ClpSimulado, RECUSA_FORA_DA_FAIXA } from './simulado.ts';
+import { ClpSimulado, alarmeSimulavel } from './simulado.ts';
 
 const leitura = (clp: ClpSimulado) =>
   decodificarLeitura(clp.db.subarray(AREA_LEITURA.inicio, AREA_LEITURA.inicio + AREA_LEITURA.tamanho));
@@ -76,13 +79,77 @@ test('o mesmo pedido não é pego duas vezes; o próximo só depois de terminar'
   assert.equal(l.OpExecucao, 8);
 });
 
-test('recusa receita fora da faixa (dupla checagem)', () => {
+test('recusa receita fora da faixa (dupla checagem), com o motivo em Resultado', () => {
   const clp = new ClpSimulado({ aleatorio: () => 0.5 });
-  rodar(clp, 100, { v: 0 }, { ...pedido, SpTemperatura: 90 });
-  const l = leitura(clp);
+  const vida = { v: 0 };
+  rodar(clp, 100, vida, { ...pedido, SpTemperatura: 90 });
+  let l = leitura(clp);
   assert.equal(l.EcoSeq, 1);
-  assert.equal(l.Resultado, RECUSA_FORA_DA_FAIXA);
+  assert.equal(l.Resultado, RECUSA.temperaturaForaDaFaixa);
   assert.equal(l.OpExecucao, 0);
+
+  const casos: [Partial<ValoresEscrita>, number][] = [
+    [{ SpVolume: 30 }, RECUSA.volumeForaDaFaixa],
+    [{ SpVazao: 0.5 }, RECUSA.vazaoForaDaFaixa],
+    [{ SpPressao: 5 }, RECUSA.pressaoForaDaFaixa],
+    [{ SpVolume: 1, SpPressao: 5 }, RECUSA.foraDaFaixa], // mais de um campo: o genérico
+  ];
+  for (const [i, [fora, codigo]] of casos.entries()) {
+    rodar(clp, 100, vida, { ...pedido, ...fora, SeqPedido: 2 + i });
+    l = leitura(clp);
+    assert.equal(l.EcoSeq, 2 + i);
+    assert.equal(l.Resultado, codigo, JSON.stringify(fora));
+  }
+  // um pedido bom depois de recusas é aceito: Resultado volta a 0
+  rodar(clp, 100, vida, { ...pedido, SeqPedido: 10 });
+  assert.equal(leitura(clp).Resultado, RECUSA.aceito);
+  assert.equal(leitura(clp).OpExecucao, 7);
+});
+
+test('falha "alarme": publica o intertravamento, fica em falha, para a batelada e não pega pedido novo', () => {
+  const clp = new ClpSimulado({ escala: 100, aleatorio: () => 0.5 });
+  const vida = { v: 0 };
+  rodar(clp, 2000, vida, pedido); // já aquecendo
+  const antes = leitura(clp);
+  assert.equal(antes.Estado, ESTADO_CLP.emProducao);
+  assert.equal(antes.Alarme, ALARME.nenhum);
+
+  clp.falha = 'alarme'; // padrão: PSH-103
+  const temperatura = clp.processo.temperatura;
+  rodar(clp, 3000, vida, pedido);
+  let l = leitura(clp);
+  assert.equal(l.Alarme, ALARME.pressaoAltaTq01);
+  assert.equal(l.Estado, ESTADO_CLP.emFalha);
+  assert.equal(l.OpExecucao, 7, 'a batelada continua com o CLP');
+  assert.equal(l.Etapa, antes.Etapa);
+  assert.equal(clp.processo.temperatura, temperatura, 'o processo ficou parado');
+  assert.ok(l.VidaClp !== antes.VidaClp, 'a vida do CLP continua andando');
+
+  clp.falha = 'nenhuma';
+  rodar(clp, 10_000, vida, pedido);
+  l = leitura(clp);
+  assert.equal(l.Alarme, ALARME.nenhum);
+  assert.equal(l.OpConcluida, 7, 'a batelada terminou depois que o alarme passou');
+  assert.equal(l.Estado, ESTADO_CLP.ocioso);
+
+  // em falha e livre: o pedido novo espera (sem eco); é pego quando o alarme passa
+  clp.falha = 'alarme';
+  clp.alarme = ALARME.emergencia;
+  const novo = { ...pedido, SeqPedido: 2, NumeroOp: 8 };
+  rodar(clp, 500, vida, novo);
+  assert.equal(leitura(clp).EcoSeq, 1);
+  assert.equal(leitura(clp).Alarme, ALARME.emergencia);
+  clp.falha = 'nenhuma';
+  rodar(clp, 100, vida, novo);
+  assert.equal(leitura(clp).EcoSeq, 2);
+  assert.equal(leitura(clp).OpExecucao, 8);
+});
+
+test('só os alarmes da tabela servem para a falha "alarme"', () => {
+  assert.ok(alarmeSimulavel(ALARME.falhaInversorB1));
+  assert.ok(!alarmeSimulavel(ALARME.nenhum));
+  assert.ok(!alarmeSimulavel(999));
+  assert.ok(!alarmeSimulavel('2'));
 });
 
 test('NumeroOp = 0 não é pedido', () => {

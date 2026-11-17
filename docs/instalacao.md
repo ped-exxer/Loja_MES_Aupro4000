@@ -41,6 +41,8 @@ sistema ("AUPRO4000 · Loja" ou "AUPRO4000 · MES") e um botão para abrir o out
 - Teste completo com o simulador: `npm run ponta-a-ponta -- http://localhost:8080 http://localhost:8081`. Precisa do
   Node 24 instalado e **reinicia a aula**: use antes da aula, não durante. Ele para o contêiner `mes` por alguns
   segundos (para conferir que a Loja recusa pedidos sem o MES) e sobe de novo; sem docker à mão, `--sem-docker`.
+  Se a pilha foi subida com outro nome de projeto (`docker compose -p <nome> up`), informe o mesmo nome na variável
+  `COMPOSE_PROJECT_NAME` ao rodar o teste.
 
 **Se o MES cair**, a Loja continua no ar: mostra o catálogo com um aviso e **recusa os pedidos** com uma mensagem
 clara (nada fica gravado pela metade). Quando o MES volta, a Loja retoma de onde parou (faturas e andamento).

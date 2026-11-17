@@ -4,8 +4,11 @@
 
 import {
   avaliarQualidade,
+  ORIGEM_MANUAL,
   calcularOee,
   criarOp,
+  decidirEmissao,
+  ehFinal,
   estimarCicloMs,
   indicadoresEntrega,
   sequenciarFila,
@@ -33,6 +36,24 @@ export type ContextoMes = {
   tempoReal: TempoReal;
   configuracao: () => Promise<Configuracao>;
 };
+
+/** Resultado de `emitirOrdens`: os números (na ordem pedida) e quantas foram criadas agora; ou por que não. */
+export type ResultadoEmissao =
+  | { ok: true; numeros: number[]; criadas: number }
+  | { ok: false; codigo: 'receita_invalida'; erros: (ErroValidacao & { indice: number })[] }
+  /** Pediram para substituir uma OP que ainda não terminou. */
+  | { ok: false; codigo: 'ordem_ativa'; indice: number; numero: number };
+
+/** Interrompe a transação da emissão (todas ou nenhuma). */
+class OrdemAtiva extends Error {
+  readonly indice: number;
+  readonly numero: number;
+  constructor(indice: number, numero: number) {
+    super(`a OP ${numero} ainda não terminou`);
+    this.indice = indice;
+    this.numero = numero;
+  }
+}
 
 /** Folga na promessa de prazo sobre o tempo estimado. */
 const FOLGA_PRAZO = 1.25;
@@ -80,8 +101,12 @@ export class Mes {
     return r;
   }
 
-  /** Aplica um evento a uma ordem (chamar dentro de `exclusivo`). */
-  async aplicar(numero: number, evento: EventoOp, autor: string | null, detalhe?: string) {
+  /**
+   * Aplica um evento a uma ordem (chamar dentro de `exclusivo`). `recusa` = código de `Resultado` do CLP, no evento
+   * `clp_recusou`. O estado, o registro e o feed de mudanças são gravados juntos (uma transação): se o banco falhar
+   * no meio, a Loja não perde uma mudança de estado nem vê uma que não houve.
+   */
+  async aplicar(numero: number, evento: EventoOp, autor: string | null, detalhe?: string, recusa?: number) {
     const ordem = await repo.buscarOrdem(this.ctx.banco, numero);
     if (!ordem) return { ok: false as const, codigo: 'ordem_inexistente' as const };
     const r = transicionar(ordem.situacao, evento);
@@ -89,10 +114,13 @@ export class Mes {
       await repo.registrarEvento(this.ctx.banco, { numeroOp: numero, tipo: 'evento_recusado', detalhe: `${evento} em ${ordem.situacao.estado}`, autor });
       return r;
     }
-    await repo.salvarSituacao(this.ctx.banco, numero, r.situacao);
-    await repo.registrarEvento(this.ctx.banco, { numeroOp: numero, tipo: evento, detalhe, autor });
     const mudanca = { numero, origem: ordem.origem, estado: r.situacao.estado };
-    await repo.registrarMudanca(this.ctx.banco, mudanca);
+    await emTransacao(this.ctx.banco, async (c) => {
+      await repo.salvarSituacao(c, numero, r.situacao);
+      if (recusa !== undefined) await repo.marcarRecusa(c, numero, recusa);
+      await repo.registrarEvento(c, { numeroOp: numero, tipo: evento, detalhe, autor });
+      await repo.registrarMudanca(c, mudanca);
+    });
     this.ctx.tempoReal.publicar('ordem', mudanca);
     return r;
   }
@@ -100,32 +128,54 @@ export class Mes {
   /**
    * Emite as ordens pedidas, todas ou nenhuma (uma transação só): a Loja nunca fica com pedido pela metade.
    * Sem prazo, cada uma recebe a promessa de prazo estimada, somando as da frente.
+   *
+   * Idempotente pela origem (`decidirEmissao`, em packages/dominio): se a OP daquela origem já existe, devolve o
+   * número dela em vez de criar outra. Quem emite pode repetir a chamada quando a resposta se perde, sem deixar
+   * OP órfã na fila, e uma origem nunca fica com duas OPs ativas. As OPs manuais (origem `manual`) e sem origem
+   * são sempre novas.
    */
-  async emitirOrdens(pedidos: PedidoOrdem[]):
-    Promise<{ ok: true; numeros: number[] } | { ok: false; erros: (ErroValidacao & { indice: number })[] }> {
+  async emitirOrdens(pedidos: PedidoOrdem[]): Promise<ResultadoEmissao> {
     const erros = pedidos.flatMap((p, indice) => {
       const criada = criarOp(p.receita);
       return [...(criada.ok ? [] : criada.codigo === 'receita_invalida' ? criada.erros : []), ...validarTolerancias(p.tolerancias)]
         .map((e) => ({ ...e, indice }));
     });
-    if (erros.length > 0) return { ok: false, erros };
+    if (erros.length > 0) return { ok: false, codigo: 'receita_invalida', erros };
     const estimados = await this.estimarPrazos(pedidos.map((p) => p.receita));
     return this.exclusivo(async () => {
-      const numeros = await emTransacao(this.ctx.banco, async (c) => {
-        const r: number[] = [];
-        for (const [i, p] of pedidos.entries()) {
-          const autor = p.autor ?? null;
-          const numero = await repo.inserirOrdem(c, { origem: p.origem, receita: p.receita, tolerancias: p.tolerancias, prazo: p.prazo ?? estimados[i], autor });
-          await repo.registrarEvento(c, { numeroOp: numero, tipo: 'criada', detalhe: p.origem, autor });
-          await repo.registrarMudanca(c, { numero, origem: p.origem, estado: 'na_fila' });
-          r.push(numero);
-        }
-        return r;
-      });
-      for (const [i, numero] of numeros.entries()) {
-        this.ctx.tempoReal.publicar('ordem', { numero, origem: pedidos[i].origem, estado: 'na_fila' });
+      let emitidas: { numero: number; nova: boolean }[];
+      try {
+        emitidas = await emTransacao(this.ctx.banco, async (c) => {
+          const r: { numero: number; nova: boolean }[] = [];
+          for (const [i, p] of pedidos.entries()) {
+            const autor = p.autor ?? null;
+            const origem = p.origem;
+            // a busca usa a conexão da transação: duas ordens da mesma origem no mesmo pedido dão a mesma OP
+            const anterior = origem !== null && origem !== ORIGEM_MANUAL ? await repo.ultimaOrdemDaOrigem(c, origem) : null;
+            const decisao = decidirEmissao(anterior && { numero: anterior.numero, final: ehFinal(anterior.situacao.estado) }, p.substitui);
+            if (anterior && decisao === 'ativa') throw new OrdemAtiva(i, anterior.numero);
+            if (anterior && decisao === 'devolver') {
+              await repo.registrarEvento(c, { numeroOp: anterior.numero, tipo: 'emissao_repetida', detalhe: origem, autor });
+              r.push({ numero: anterior.numero, nova: false });
+              continue;
+            }
+            const numero = await repo.inserirOrdem(c, { origem, receita: p.receita, tolerancias: p.tolerancias, prazo: p.prazo ?? estimados[i], autor });
+            await repo.registrarEvento(c, { numeroOp: numero, tipo: 'criada', detalhe: origem, autor });
+            // "produzir de novo": a OP anterior guarda qual a substituiu
+            if (anterior) await repo.registrarEvento(c, { numeroOp: anterior.numero, tipo: 'substituida', detalhe: `OP ${numero}`, autor });
+            await repo.registrarMudanca(c, { numero, origem, estado: 'na_fila' });
+            r.push({ numero, nova: true });
+          }
+          return r;
+        });
+      } catch (erro) {
+        if (erro instanceof OrdemAtiva) return { ok: false as const, codigo: 'ordem_ativa' as const, indice: erro.indice, numero: erro.numero };
+        throw erro;
       }
-      return { ok: true as const, numeros };
+      for (const [i, e] of emitidas.entries()) {
+        if (e.nova) this.ctx.tempoReal.publicar('ordem', { numero: e.numero, origem: pedidos[i].origem, estado: 'na_fila' });
+      }
+      return { ok: true as const, numeros: emitidas.map((e) => e.numero), criadas: emitidas.filter((e) => e.nova).length };
     });
   }
 
@@ -216,22 +266,22 @@ export class Mes {
     const ordens = await repo.buscarOrdens(this.ctx.banco, numeros);
     const fila = await this.fila();
     const bancada = this.despachante.estado();
-    return Promise.all(
-      ordens.map(async (o) => {
-        const naFila = fila.find((f) => f.ordem.numero === o.numero);
-        const produzindo = bancada.opExecucao === o.numero;
-        return {
-          numero: o.numero,
-          estado: o.situacao.estado,
-          prazo: o.prazo,
-          posicaoFila: naFila ? naFila.posicao : null,
-          fimEstimado: naFila ? naFila.fimEstimado : null,
-          etapa: produzindo ? bancada.etapa : null,
-          processo: produzindo ? bancada.processo : null,
-          batelada: await repo.buscarBatelada(this.ctx.banco, o.numero),
-        };
-      }),
-    );
+    const bateladas = new Map((await repo.buscarBateladas(this.ctx.banco, ordens.map((o) => o.numero))).map((b) => [b.numeroOp, b]));
+    return ordens.map((o) => {
+      const naFila = fila.find((f) => f.ordem.numero === o.numero);
+      const produzindo = bancada.opExecucao === o.numero;
+      return {
+        numero: o.numero,
+        estado: o.situacao.estado,
+        prazo: o.prazo,
+        posicaoFila: naFila ? naFila.posicao : null,
+        fimEstimado: naFila ? naFila.fimEstimado : null,
+        etapa: produzindo ? bancada.etapa : null,
+        processo: produzindo ? bancada.processo : null,
+        batelada: bateladas.get(o.numero) ?? null,
+        recusa: o.recusa,
+      };
+    });
   }
 
   /** Feed para a Loja (contrato, GET /api/ordens/mudancas). */
@@ -250,7 +300,7 @@ export class Mes {
       avaliacao: batelada ? avaliarQualidade(ordem.receita, ordem.tolerancias, batelada) : null,
       inspecao: await repo.buscarInspecao(this.ctx.banco, numero),
       leituras: await repo.leituras(this.ctx.banco, numero),
-      eventos: await repo.eventos(this.ctx.banco, numero),
+      eventos: await repo.eventosDaOrdem(this.ctx.banco, numero),
     };
   }
 
@@ -321,7 +371,7 @@ export class Mes {
   async relatorioCsv(): Promise<string> {
     const ind = await this.indicadores();
     const cfg = await this.ctx.configuracao();
-    const todas = (await repo.listarOrdens(this.ctx.banco)).filter((o) => o.chegada >= cfg.inicioAula);
+    const todas = await repo.ordensDesde(this.ctx.banco, cfg.inicioAula);
     const n = (v: number | null | undefined, casas = 2) => (v === null || v === undefined ? '' : v.toFixed(casas).replace('.', ','));
     const pct = (v: number | null) => (v === null ? '' : `${n(v * 100, 1)} %`);
     const data = (v: number | null) => (v === null ? '' : new Date(v).toISOString());
@@ -356,7 +406,7 @@ export class Mes {
   /** Reinicia o cenário da aula: apaga ordens e registros do MES (a numeração das OPs continua). */
   reiniciar(): Promise<void> {
     return this.exclusivo(async () => {
-      await repo.apagarTudo(this.ctx.banco);
+      await emTransacao(this.ctx.banco, (c) => repo.apagarTudo(c)); // tudo ou nada: não fica a aula apagada pela metade
       this.despachante.reiniciar();
       this.ctx.tempoReal.publicar('ordem', { reiniciado: true });
     });

@@ -15,11 +15,11 @@ NON_RETAIN
       Reservado1 : Array[0..3] of Word;   // byte 24: reservado
       VidaClp : Word;   // byte 32 (escrita do CLP): CLP soma 1 a cada ciclo
       EcoSeq : Word;   // byte 34 (escrita do CLP): SeqPedido do ultimo pedido recebido (copiar no mesmo ciclo em que pega o pedido)
-      Resultado : Int;   // byte 36 (escrita do CLP): do pedido recebido: 0 aceito, >0 recusado
+      Resultado : Int;   // byte 36 (escrita do CLP): do pedido recebido: 0 aceito, 1 fora da faixa, 2 volume fora da faixa, 3 temperatura fora da faixa, 4 vazao fora da faixa, 5 pressao fora da faixa, 6 bancada em falha
       Estado : Int;   // byte 38 (escrita do CLP): 0 ocioso, 1 em producao, 2 parada, 3 em falha
       Etapa : Int;   // byte 40 (escrita do CLP): 0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver, 6 resfriar
       OpExecucao : DInt;   // byte 42 (escrita do CLP): OP em producao (0 = nenhuma)
-      Alarme : Word;   // byte 46 (escrita do CLP): codigo do ultimo alarme/intertravamento
+      Alarme : Word;   // byte 46 (escrita do CLP): intertravamento ativo (o de menor codigo): 0 nenhum, 1 emergencia, 2 PSH-103 pressao alta TQ-01, 3 TSH-104 temperatura alta TQ-01, 4 LSL-104 TQ-01 sem nivel, 5 FSL-102 B1 sem vazao, 6 LSL reservatorio sem agua, 7 LSH-101 TQ-02 cheio, 8 LSL-101 TQ-02 sem nivel, 9 PTT-106 falta de ar de instrumento, 10 FY-102 falha do inversor da B1, 11 FY-105 falha do inversor do M1
       OpConcluida : DInt;   // byte 48 (escrita do CLP): ultima OP terminada: gravar POR ULTIMO, depois dos campos abaixo
       ResultadoOp : Int;   // byte 52 (escrita do CLP): 1 concluida, 2 abortada
       VolumeProduzido : Real;   // byte 54 (escrita do CLP): L no TQ-02 (LIT-101) no fim da transferencia

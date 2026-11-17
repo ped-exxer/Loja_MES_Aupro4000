@@ -6,7 +6,8 @@
 //   disponibilizar → grava no CLP → escritaConfirmada → leituras seguintes → aoLerEco
 
 import { proximoWord } from './codec.ts';
-import { NENHUM_PEDIDO, RESULTADO_ACEITO } from './layout.ts';
+import { RESULTADO_ACEITO } from './codigos.ts';
+import { NENHUM_PEDIDO } from './layout.ts';
 
 export type Envio = {
   seq: number;

@@ -47,7 +47,8 @@ export async function emTransacao<T>(banco: Banco, fn: (c: PoolConnection) => Pr
     await c.commit();
     return r;
   } catch (erro) {
-    await c.rollback();
+    // se a conexão caiu, o rollback também falha (o MySQL já desfez): o erro que interessa é o primeiro
+    await c.rollback().catch(() => undefined);
     throw erro;
   } finally {
     c.release();

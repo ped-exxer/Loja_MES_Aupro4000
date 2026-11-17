@@ -26,7 +26,13 @@ coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decis
     (`SeqPedido` e `EcoSeq`, seção 6.4), com o contador de vida. Queda de comunicação nunca conclui uma OP.
 - O MES nunca fala direto com o CLP: só pelo **gateway**, e só o MES fala com o gateway. Toda fábrica (bancada física, Simmaq 3DX, simulado) é um
   driver do gateway com a mesma interface (`apps/gateway/src/driver.ts`).
-- Desenvolva e teste contra o **driver simulado**; os testes não dependem da bancada nem do banco.
+- Desenvolva e teste contra o **driver simulado**; os testes não dependem da bancada nem do banco. O driver `s7`
+  é testado contra o servidor S7 de teste (`apps/gateway/src/teste/servidor-s7.ts`), uma imitação: não vale como
+  prova numa CPU.
+- Os códigos de `Alarme` e de `Resultado` do CLP ficam **só** em `packages/contrato-clp/src/codigos.ts`
+  (proposta, a confirmar com o programa do CLP). As APIs expõem o código; o texto é da tela.
+- A emissão de OPs (`POST /api/ordens`) é **idempotente pela origem**: repetir devolve a OP que já existe; produzir
+  de novo um item usa `substitui`. Uma origem nunca tem duas OPs ativas (ROTEIRO, seção 3.5).
 - Regras de negócio (estados da OP, validação de receita, sequenciamento, qualidade, OEE) ficam em
   `packages/dominio`, com testes, sem depender de banco nem de rede.
 - Back-end em TypeScript rodando direto no Node 24: só sintaxe "apagável" (sem `enum`, `namespace`, propriedades no
@@ -40,14 +46,14 @@ coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decis
 | Onde | O quê |
 |---|---|
 | `packages/dominio` | receita e faixas, máquina de estados da OP, sequenciamento, estimativa de ciclo por rodadas, qualidade, OEE; tipos do contrato Loja↔MES (`integracao.ts`) |
-| `packages/contrato-clp` | layout do DB `MES`, conversão de bytes, aperto de mão (`aperto.ts`), fonte para o TIA |
+| `packages/contrato-clp` | layout do DB `MES`, conversão de bytes, aperto de mão (`aperto.ts`), códigos de alarme e de recusa (`codigos.ts`), fonte para o TIA |
 | `packages/servidor` | o comum aos dois back-ends: banco, SSE, utilidades das rotas, tela servida pelo processo (`tela.ts`), `/api/sistema` |
-| `packages/interface` | o comum às duas telas: API, SSE, formatação, componentes, estilo, idioma, textos comuns, topo com o nome do sistema |
+| `packages/interface` | o comum às duas telas: API, SSE, formatação, componentes (botões, campos, avisos, diálogos), gráficos em SVG, estilo, tema claro/escuro, idioma, textos comuns, topo com o nome do sistema |
 | `apps/loja/api` | a Loja (ERP): catálogo, clientes, pedidos, faturas, vitrine (`erp.ts`), cliente HTTP do MES (`cliente-mes.ts`), feed de mudanças (`mudancas.ts`) |
 | `apps/loja/web` | a tela da Loja (React + Vite): vitrine, acompanhamento, certificado, pedidos, catálogo, reiniciar a aula |
 | `apps/mes/api` | o MES: ordens, fila, despacho (laço com o CLP, `despacho.ts`), qualidade, paradas, indicadores; contrato com a Loja (`integracao.ts`); configuração da bancada e reiniciar o MES (`administracao.ts`) |
 | `apps/mes/web` | a tela do MES (React + Vite): fila, bancada, qualidade, indicadores, detalhe da OP, configuração |
-| `apps/gateway` | drivers `simulado` (imita o programa do CLP) e `s7` (nodes7); HTTP para o MES |
+| `apps/gateway` | drivers `simulado` (imita o programa do CLP) e `s7` (nodes7); HTTP para o MES; servidor S7 de teste (`src/teste/`) |
 | `docker/banco` | script da primeira subida do MySQL: bases `loja` e `mes` e os dois usuários |
 | `docs/` | instalação, programa do CLP, DB `MES` para o TIA |
 
@@ -64,4 +70,6 @@ coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decis
   `dev:loja-web` (Vite, com proxy de `/api`). Precisa de um MySQL com as bases de `docker/banco/01-bases.sql`.
 - `npm run ponta-a-ponta -- <url-da-loja> <url-do-mes>`: teste de ponta a ponta com a pilha no ar e o simulador
   (reinicia a aula; para e sobe o contêiner `mes` para conferir a recusa do pedido; `--sem-docker` pula isso).
+  Pilha subida com outro nome de projeto (`docker compose -p <nome>`): informe o nome em `COMPOSE_PROJECT_NAME`.
 - `npm run db-mes`: gera `docs/clp/MES.db` do contrato.
+- `npm run manuais`: gera os PDFs dos manuais de `docs/` em `docs/pdf/` (ver `.claude/skills/gerar-manuais`).

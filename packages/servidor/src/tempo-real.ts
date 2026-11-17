@@ -27,9 +27,12 @@ export function registrarTempoReal(app: FastifyInstance): TempoReal {
   const batida = setInterval(() => {
     for (const c of clientes) c.write(': batida\n\n');
   }, 15_000);
-  app.addHook('onClose', async () => {
+  // preClose (antes de o servidor parar de escutar), não onClose: o servidor só termina de fechar quando as
+  // conexões acabam, e as do SSE ficam abertas para sempre. Sem isto, o encerramento (docker stop) penduraria.
+  app.addHook('preClose', async () => {
     clearInterval(batida);
     for (const c of clientes) c.end();
+    clientes.clear();
   });
 
   return {

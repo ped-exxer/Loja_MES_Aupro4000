@@ -45,7 +45,7 @@ SE SeqPedido <> EcoSeq E NumeroOp <> 0 ENTÃO
     seq      := SeqPedido            // 1. copie o número do pedido primeiro
     receita  := NumeroOp e Sp*       // 2. copie os valores
     SE SeqPedido = seq ENTÃO         // 3. confira que o MES não trocou o pedido no meio da cópia
-        SE receita fora das faixas → Resultado := motivo (> 0)
+        SE receita fora das faixas → Resultado := motivo (> 0, tabela da seção 6.2)
         SENÃO                        → Resultado := 0; OpExecucao := NumeroOp; começa a batelada
         EcoSeq := seq                // 4. ecoe a CÓPIA, no mesmo ciclo
     FIM   // senão: tente de novo no próximo ciclo
@@ -58,7 +58,10 @@ FIM
   ele pode devolver o antigo à fila na hora.
 - `NumeroOp = 0` quer dizer "nenhum pedido": não pegue nada.
 - Faixas (dupla checagem; o MES já validou): volume 2–20 L, temperatura 40–65 °C, vazão 1–6 L/min, pressão
-  1,5–3 bar. Os códigos de `Resultado` > 0 são seus: anote-os no ROTEIRO quando definir.
+  1,5–3 bar. O motivo da recusa vai em `Resultado`, pela tabela da seção 6.2.
+- **Bancada em falha** (intertravamento ativo): o melhor é **não pegar** o pedido. Ele continua disponível e você o
+  pega quando a falha passar; é o que o simulador faz. Recusar (`Resultado` = 6) é definitivo: a OP fica "recusada"
+  e só volta a ser produzida se alguém pedir de novo.
 
 ## 4. Durante a batelada
 
@@ -94,6 +97,9 @@ direto para a transferência.
 4 aguardar, 5 devolver, **6 resfriar**), `OpExecucao` e `Alarme` aparecem nas telas. Numa batelada em rodadas a
 `Etapa` volta de 3 para 2 (ou 6) a cada rodada nova. O MES não decide nada com eles.
 
+`Alarme` é o **intertravamento ativo** (tabela da seção 6.1; 0 = nenhum). O MES mostra o alarme na tela da Bancada,
+registra quando ele começa e quando termina (na OP que estava em produção) e sugere o motivo ao apontar a parada.
+
 **A cada ciclo**, mesmo ocioso, escreva no DB `MES`:
 
 - `TemperaturaTq02` (byte 82, Real): °C do **TE-105a**, a água no TQ-02 (o produto pronto);
@@ -127,7 +133,57 @@ Quando esvaziar o TQ-02 (direto, ou esperando um botão na bancada) é decisão 
 concluída" pode ser publicada no fim da transferência ou no fim da devolução; o simulador publica no fim da
 devolução, quando a bancada fica livre.
 
-## 6. Como testar sem a Loja inteira
+## 6. Códigos de `Alarme` e de `Resultado`
+
+**Proposta, a confirmar com o programa do CLP** (decisão 9 do ROTEIRO). Os números ficam num lugar só,
+`packages/contrato-clp/src/codigos.ts`: o simulador, o MES e os comentários do `MES.db` saem de lá. Se o programa
+precisar de outro código, mude lá e gere o `MES.db` de novo.
+
+### 6.1 `Alarme` (Word, byte 46)
+
+O intertravamento **ativo agora**; **0 quando não há nenhum**. Com mais de um ativo, publique o de **menor código**
+(a tabela está em ordem de gravidade). Quando a condição some, volte a 0. Não é um histórico: quem guarda o
+histórico é o MES, que registra cada mudança.
+
+| Código | Nome no contrato | O que é | No P&ID / projeto elétrico |
+|---|---|---|---|
+| 0 | `nenhum` | Sem alarme | — |
+| 1 | `emergencia` | Botão de emergência | `%I1.4` (folha 4) |
+| 2 | `pressaoAltaTq01` | Pressão alta no TQ-01 | PSH-103 (3,8 bar) |
+| 3 | `temperaturaAltaTq01` | Temperatura alta no TQ-01 | TSH-104 |
+| 4 | `nivelBaixoTq01` | TQ-01 sem nível (resistência a seco) | LSL-104 |
+| 5 | `semVazaoB1` | B1 ligada sem vazão | FSL-102 |
+| 6 | `nivelBaixoReservatorio` | Reservatório sem água | LSL do reservatório |
+| 7 | `nivelAltoTq02` | TQ-02 cheio | LSH-101 |
+| 8 | `nivelBaixoTq02` | TQ-02 sem nível quando deveria ter produto | LSL-101 |
+| 9 | `faltaArInstrumento` | Falta de ar de instrumento | PTT-106 |
+| 10 | `falhaInversorB1` | Falha do inversor da bomba B1 | FY-102 (`%I1.2`) |
+| 11 | `falhaInversorM1` | Falha do inversor do ventilador M1 | FY-105 (`%I1.3`) |
+
+- Quando publicar cada um (limite do PTT-106, em que momento o LSL-101 é falha e não o estado normal do tanque vazio)
+  é do programa do CLP; o P&ID não dá esses valores (pendências em `docs/instrumentos-notas.md`).
+- O que o alarme faz na bancada (desligar a B1, a resistência, fechar a FV-102, abortar ou só pausar a batelada)
+  também é do programa. O MES só mostra e registra. Se a batelada for abandonada, publique a OP como **abortada**
+  (seção 5).
+- Código fora da tabela: o MES registra o número assim mesmo e a tela mostra o número.
+
+### 6.2 `Resultado` (Int, byte 36)
+
+Do pedido que você pegou. Grave junto com o eco (`EcoSeq`), no mesmo ciclo.
+
+| Código | Nome no contrato | Quando |
+|---|---|---|
+| 0 | `aceito` | Pedido aceito: a batelada começa |
+| 1 | `foraDaFaixa` | Receita fora das faixas: mais de um campo, ou sem dizer qual |
+| 2 | `volumeForaDaFaixa` | Só `SpVolume` fora de 2–20 L |
+| 3 | `temperaturaForaDaFaixa` | Só `SpTemperatura` fora de 40–65 °C |
+| 4 | `vazaoForaDaFaixa` | Só `SpVazao` fora de 1–6 L/min |
+| 5 | `pressaoForaDaFaixa` | Só `SpPressao` fora de 1,5–3 bar |
+| 6 | `bancadaEmFalha` | A bancada estava em falha quando o pedido foi pego (prefira não pegar: seção 3) |
+
+O MES guarda o código na OP recusada e no registro `clp_recusou` (`Resultado <código>`); a tela mostra o motivo.
+
+## 7. Como testar sem a Loja inteira
 
 1. Com a Loja no ar e a Configuração em "Bancada (S7)", com o IP, rack 0 e slot 1, clique em **Procurar** para
    achar o DB e depois em **Salvar**.
@@ -135,3 +191,9 @@ devolução, quando a bancada fica livre.
 3. Crie uma OP manual em Fila (PCP) e veja `NumeroOp`/`SeqPedido` mudarem no DB (tabela de observação no TIA).
 4. Mude `EcoSeq` à mão para o valor de `SeqPedido`: a OP passa a "Em produção". Escreva o bloco da OP concluída:
    ela passa a "Produzida".
+5. Escreva um código em `Alarme` (2, por exemplo): a tela da Bancada mostra o alarme e os registros ganham o início;
+   volte a 0 e aparece o fim.
+
+No simulador (sem bancada), a falha "alarme" faz o mesmo: `POST /api/admin/simulador/falha` no MES com
+`{ "falha": "alarme", "alarme": 2 }` publica o intertravamento, põe o CLP "em falha" e para a batelada onde está, até
+`{ "falha": "nenhuma" }`.

@@ -15,6 +15,8 @@ export type Processo = {
 export type ConfiguracaoDriver = {
   driver: 'simulado' | 's7';
   ip: string;
+  /** Porta TCP do S7 (ISO-on-TCP). Só os testes mudam: na CPU é sempre a 102. */
+  porta?: number;
   rack: number;
   slot: number;
   /** Número do DB `MES`. */

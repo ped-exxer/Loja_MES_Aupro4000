@@ -12,8 +12,8 @@ import {
   type ValoresLeitura,
 } from '@aupro/contrato-clp';
 import type { ConfiguracaoDriver, DbsEncontrados, Driver, Processo } from './driver.ts';
-import { DriverSimulado, type FalhaSimulada } from './simulado.ts';
-import { DriverS7 } from './s7.ts';
+import { DriverSimulado, alarmeSimulavel, type FalhaSimulada } from './simulado.ts';
+import { DriverS7, type OpcoesS7 } from './s7.ts';
 
 export type Leitura = { escrita: ValoresEscrita; leitura: ValoresLeitura; processo: Processo | null };
 
@@ -37,8 +37,12 @@ export const CONFIGURACAO_PADRAO: ConfiguracaoDriver = {
   escalaSimulador: 20,
 };
 
+/** Só os testes mudam: tempos menores para não esperar segundos. */
+export type OpcoesServico = { esperaReconexaoMs?: number; s7?: OpcoesS7 };
+
 export class Servico {
   config: ConfiguracaoDriver;
+  private opcoes: OpcoesServico;
   private driver: Driver;
   private simulado: DriverSimulado | null = null;
   private conectado = false;
@@ -47,13 +51,14 @@ export class Servico {
   private ultimoErro: string | null = null;
   private fila: Promise<unknown> = Promise.resolve();
 
-  constructor(config: ConfiguracaoDriver) {
+  constructor(config: ConfiguracaoDriver, opcoes: OpcoesServico = {}) {
     this.config = config;
+    this.opcoes = opcoes;
     this.driver = this.criarDriver(config);
   }
 
   private criarDriver(config: ConfiguracaoDriver): Driver {
-    if (config.driver === 's7') return new DriverS7(config);
+    if (config.driver === 's7') return new DriverS7(config, this.opcoes.s7);
     // o simulado guarda o estado do "CLP": reaproveita entre configurações
     this.simulado ??= new DriverSimulado({ escala: config.escalaSimulador });
     this.simulado.clp.escala = config.escalaSimulador;
@@ -91,7 +96,7 @@ export class Servico {
 
   private async garantirConexao(): Promise<void> {
     if (this.conectado) return;
-    if (Date.now() - this.ultimaTentativa < ESPERA_RECONEXAO_MS) {
+    if (Date.now() - this.ultimaTentativa < (this.opcoes.esperaReconexaoMs ?? ESPERA_RECONEXAO_MS)) {
       throw new ErroGateway('sem_conexao', this.ultimoErro ?? 'sem conexão');
     }
     this.ultimaTentativa = Date.now();
@@ -143,22 +148,39 @@ export class Servico {
     });
   }
 
-  /** Procura os DBs com a configuração dada (sem trocar a atual). */
+  /**
+   * Procura os DBs com a configuração dada (sem trocar a atual), numa conexão própria e temporária (a CPU aceita
+   * várias). Falha de conexão sai como ErroGateway, com a mensagem do driver.
+   */
   async procurar(config: ConfiguracaoDriver): Promise<DbsEncontrados> {
     if (config.driver === 'simulado') return { mes: 1, processo: null };
-    const temporario = new DriverS7(config);
+    const temporario = new DriverS7(config, this.opcoes.s7);
     try {
       await temporario.conectar();
       return await temporario.procurarDbs();
+    } catch (erro) {
+      throw new ErroGateway('sem_conexao', erro instanceof Error ? erro.message : String(erro));
     } finally {
       await temporario.desconectar().catch(() => undefined);
     }
   }
 
-  /** Só no driver simulado: falhas para a aula e para os testes. */
-  falhaSimulada(falha: FalhaSimulada): boolean {
+  /**
+   * Só no driver simulado: falhas para a aula e para os testes. Na falha `alarme`, `alarme` é o código do
+   * intertravamento (tabela ALARME do contrato); sem ele, vale o último usado (de início, PSH-103).
+   */
+  falhaSimulada(falha: FalhaSimulada, alarme?: number): boolean {
     if (this.config.driver !== 'simulado' || !this.simulado) return false;
+    if (falha === 'alarme' && alarmeSimulavel(alarme)) this.simulado.clp.alarme = alarme;
     this.simulado.clp.falha = falha;
     return true;
+  }
+
+  /** Fecha a conexão com o CLP (a CPU tem poucas conexões: não deixar uma pendurada ao parar o gateway). */
+  encerrar(): Promise<void> {
+    return this.exclusivo(async () => {
+      this.conectado = false;
+      await this.driver.desconectar().catch(() => undefined);
+    });
   }
 }

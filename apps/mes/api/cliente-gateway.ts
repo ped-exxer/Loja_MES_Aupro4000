@@ -50,7 +50,7 @@ export function criarClienteGateway(base: string) {
     configurar: (c: ConfiguracaoGateway) => pedir<void>('PUT', '/configuracao', c),
     procurar: (c: ConfiguracaoGateway) =>
       pedir<{ mes: number | null; processo: number | null }>('POST', '/procurar-db', c, 120_000),
-    falhaSimulada: (falha: string) => pedir<void>('POST', '/simulador/falha', { falha }),
+    falhaSimulada: (falha: string, alarme?: number) => pedir<void>('POST', '/simulador/falha', { falha, alarme }),
     saude: () =>
       pedir<{ driver: string; conectado: boolean; assinaturaOk: boolean; erro: string | null; config: ConfiguracaoGateway }>(
         'GET', '/saude', undefined, 1500,

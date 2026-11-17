@@ -2,7 +2,7 @@
 // "Reiniciar a aula" inteira é da Loja: ela apaga os dados dela e chama o reiniciar daqui (o MES não chama a Loja).
 
 import type { FastifyInstance } from 'fastify';
-import type { Banco } from '@aupro/servidor';
+import { objeto, type Banco } from '@aupro/servidor';
 import { ErroGateway, type ClienteGateway } from './cliente-gateway.ts';
 import {
   lerConfiguracao,
@@ -33,16 +33,21 @@ export function registrarRotasAdministracao(
     tempoReal: TempoReal;
     configuracao: ReturnType<typeof criarLeitorConfiguracao>;
     reiniciar: () => Promise<void>;
+    /**
+     * Manda a configuração nova ao gateway e faz o despacho reconciliar com o CLP que está do outro lado agora.
+     * Fora do ciclo do despacho (um por vez): senão um ciclo leria de um CLP e escreveria no outro.
+     */
+    aplicarNoGateway: (c: Omit<Configuracao, 'inicioAula'>) => Promise<void>;
   },
 ): void {
   app.get('/api/admin/configuracao', async () => p.configuracao.ler());
 
   app.put('/api/admin/configuracao', async (req, reply) => {
-    const v = validarConfiguracao(req.body as Partial<Configuracao>);
+    const v = validarConfiguracao(objeto(req.body));
     if (!v.ok) return reply.code(422).send({ erro: 'configuracao_invalida', erros: v.erros });
     await salvarConfiguracao(p.banco, v.valor);
     p.configuracao.invalidar();
-    await p.gateway.configurar(paraGateway(v.valor)).catch(() => undefined); // o despacho reenvia se o gateway estiver fora
+    await p.aplicarNoGateway(v.valor); // se o gateway estiver fora, o despacho reenvia quando ele voltar
     p.tempoReal.publicar('configuracao', {});
     return { ok: true };
   });
@@ -50,12 +55,14 @@ export function registrarRotasAdministracao(
   /** Procura os DBs MES e MB_Simulador pela assinatura, com a configuração da tela (ainda não salva). */
   app.post('/api/admin/procurar-db', async (req, reply) => {
     const atual = await p.configuracao.ler();
-    const v = validarConfiguracao({ ...atual, ...(req.body as Partial<Configuracao>) });
+    const v = validarConfiguracao({ ...atual, ...objeto(req.body) });
     if (!v.ok) return reply.code(422).send({ erro: 'configuracao_invalida', erros: v.erros });
     try {
       return await p.gateway.procurar(paraGateway(v.valor));
     } catch (erro) {
-      return reply.code(502).send({ erro: erro instanceof ErroGateway ? erro.codigo : 'gateway', mensagem: String(erro) });
+      return reply.code(502).send({
+        erro: erro instanceof ErroGateway ? erro.codigo : 'gateway', mensagem: erro instanceof Error ? erro.message : String(erro),
+      });
     }
   });
 
@@ -67,13 +74,19 @@ export function registrarRotasAdministracao(
     }
   });
 
+  /**
+   * Falhas do simulador para a aula: `nenhuma`, `congelar`, `abortar` ou `alarme` (um intertravamento; `alarme` =
+   * código da tabela ALARME do contrato do CLP, padrão PSH-103).
+   */
   app.post('/api/admin/simulador/falha', async (req, reply) => {
-    const { falha } = req.body as { falha?: string };
+    const { falha, alarme } = objeto(req.body);
     try {
-      await p.gateway.falhaSimulada(String(falha));
+      await p.gateway.falhaSimulada(String(falha), typeof alarme === 'number' ? alarme : undefined);
       return { ok: true };
     } catch (erro) {
-      return reply.code(409).send({ erro: erro instanceof ErroGateway ? erro.codigo : 'gateway' });
+      const codigo = erro instanceof ErroGateway ? erro.codigo : 'gateway';
+      // falha ou código de alarme que não existe: 400; driver que não é o simulado (ou gateway fora): 409
+      return reply.code(codigo === 'pedido_invalido' ? 400 : 409).send({ erro: codigo });
     }
   });
 

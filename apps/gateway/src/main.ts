@@ -5,12 +5,12 @@
 //   PUT  /escrita             grava a área de escrita do MES (ValoresEscrita)
 //   PUT  /configuracao        troca driver, IP, rack, slot, DBs
 //   POST /procurar-db         acha os DBs pela assinatura (corpo: configuração a testar)
-//   POST /simulador/falha     só no simulado: { falha: "nenhuma" | "congelar" | "abortar" }
+//   POST /simulador/falha     só no simulado: { falha: "nenhuma" | "congelar" | "abortar" | "alarme", alarme?: código }
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { ConfiguracaoDriver } from './driver.ts';
 import { CONFIGURACAO_PADRAO, ErroGateway, Servico } from './servico.ts';
-import type { FalhaSimulada } from './simulado.ts';
+import { FALHAS_SIMULADAS, alarmeSimulavel, type FalhaSimulada } from './simulado.ts';
 
 const PORTA = Number(process.env.PORTA ?? 4000);
 
@@ -29,14 +29,23 @@ function responder(res: ServerResponse, status: number, corpo?: unknown) {
   res.end(JSON.stringify(corpo));
 }
 
-async function lerCorpo(req: IncomingMessage): Promise<unknown> {
+const MAX_CORPO = 64 * 1024;
+
+/** Corpo JSON do pedido, sempre um objeto (corpo vazio, `null` ou lista viram {}; JSON inválido é SyntaxError → 400). */
+async function lerCorpo(req: IncomingMessage): Promise<Record<string, unknown>> {
   const partes: Buffer[] = [];
-  for await (const parte of req) partes.push(parte as Buffer);
+  let tamanho = 0;
+  for await (const parte of req) {
+    tamanho += (parte as Buffer).length;
+    if (tamanho > MAX_CORPO) throw new RangeError('corpo grande demais');
+    partes.push(parte as Buffer);
+  }
   const texto = Buffer.concat(partes).toString('utf8');
-  return texto ? JSON.parse(texto) : {};
+  const dados: unknown = texto ? JSON.parse(texto) : {};
+  return typeof dados === 'object' && dados !== null && !Array.isArray(dados) ? (dados as Record<string, unknown>) : {};
 }
 
-function configuracaoDe(corpo: unknown): ConfiguracaoDriver {
+function configuracaoDe(corpo: Record<string, unknown>): ConfiguracaoDriver {
   const c = corpo as Partial<ConfiguracaoDriver>;
   const numero = (v: unknown, padrao: number) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : padrao);
   return {
@@ -67,8 +76,11 @@ async function tratar(req: IncomingMessage, res: ServerResponse) {
     case 'POST /procurar-db':
       return responder(res, 200, await servico.procurar(configuracaoDe(await lerCorpo(req))));
     case 'POST /simulador/falha': {
-      const { falha } = (await lerCorpo(req)) as { falha?: FalhaSimulada };
-      const ok = falha === 'nenhuma' || falha === 'congelar' || falha === 'abortar' ? servico.falhaSimulada(falha) : false;
+      const { falha, alarme } = await lerCorpo(req);
+      if (!FALHAS_SIMULADAS.includes(falha as FalhaSimulada) || (alarme !== undefined && !alarmeSimulavel(alarme))) {
+        return responder(res, 400, { erro: 'pedido_invalido' });
+      }
+      const ok = servico.falhaSimulada(falha as FalhaSimulada, alarme as number | undefined);
       return responder(res, ok ? 204 : 409, ok ? undefined : { erro: 'so_no_simulado' });
     }
     default:
@@ -80,12 +92,23 @@ const servidor = createServer((req, res) => {
   tratar(req, res).catch((erro: unknown) => {
     if (erro instanceof ErroGateway) return responder(res, 503, { erro: erro.codigo, mensagem: erro.message });
     if (erro instanceof RangeError || erro instanceof SyntaxError) return responder(res, 400, { erro: 'pedido_invalido', mensagem: erro.message });
-    console.error(erro);
+    console.error(`gateway: erro em ${req.method} ${req.url}:`, erro);
     return responder(res, 500, { erro: 'interno' });
   });
 });
 
-const encerrar = () => servidor.close(() => process.exit(0));
+// Encerramento limpo (docker stop): para de aceitar pedidos, fecha a conexão com o CLP e sai. As conexões HTTP
+// paradas (keep-alive do MES) são fechadas na hora, senão o servidor esperaria por elas.
+let encerrando = false;
+const encerrar = () => {
+  if (encerrando) return;
+  encerrando = true;
+  console.log('gateway: encerrando');
+  setTimeout(() => process.exit(0), 4000).unref(); // se algo não fechar, sai assim mesmo
+  servidor.close();
+  servidor.closeIdleConnections();
+  void servico.encerrar().finally(() => process.exit(0));
+};
 process.on('SIGTERM', encerrar);
 process.on('SIGINT', encerrar);
 
