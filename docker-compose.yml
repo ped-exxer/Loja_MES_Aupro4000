@@ -1,0 +1,55 @@
+# Sobe a Loja inteira num PC da escola, offline: docker compose up --build
+# Abrir http://localhost:8080 (outra porta: PORTA_LOJA=8090 docker compose up)
+#
+# Senhas fixas: a instalação é offline e local. Troque-as se o PC estiver numa rede compartilhada.
+
+services:
+  banco:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: loja
+      MYSQL_USER: loja
+      MYSQL_PASSWORD: loja
+      MYSQL_ROOT_PASSWORD: loja-root
+    volumes:
+      - dados-banco:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uloja", "-ploja"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  gateway:
+    build: { context: ., target: gateway }
+    environment:
+      PORTA: 4000
+      DRIVER: simulado
+    # Fase 4 (driver s7): o contêiner precisa alcançar o IP da CPU na porta 102.
+    # Se a rede bridge não tiver rota para a LAN da bancada, use network_mode: host.
+    restart: unless-stopped
+
+  api:
+    build: { context: ., target: api }
+    environment:
+      PORTA: 3000
+      GATEWAY_URL: http://gateway:4000
+      BANCO_HOST: banco
+      BANCO_USUARIO: loja
+      BANCO_SENHA: loja
+      BANCO_NOME: loja
+    depends_on:
+      banco: { condition: service_healthy }
+      gateway: { condition: service_started }
+    restart: unless-stopped
+
+  loja-web:
+    build: { context: ., target: loja-web }
+    ports:
+      - "${PORTA_LOJA:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  dados-banco:

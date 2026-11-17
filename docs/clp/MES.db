@@ -1,0 +1,40 @@
+// DB MES da Loja/MES AUPRO4000. Gerado por packages/contrato-clp (npm run db-mes): nao editar a mao.
+// Sem "Optimized block access": o MES le e escreve por deslocamento de byte (S7 PUT/GET).
+DATA_BLOCK "MES"
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+NON_RETAIN
+   STRUCT
+      VidaMes : Word;   // byte 0 (escrita do MES): MES soma 1 a cada ciclo
+      SeqPedido : Word;   // byte 2 (escrita do MES): MES soma 1 ao trocar o pedido disponivel
+      NumeroOp : DInt;   // byte 4 (escrita do MES): OP disponivel (0 = nenhum pedido)
+      SpVolume : Real;   // byte 8 (escrita do MES): L no TQ-02
+      SpTemperatura : Real;   // byte 12 (escrita do MES): graus C
+      SpVazao : Real;   // byte 16 (escrita do MES): L/min no envase
+      SpPressao : Real;   // byte 20 (escrita do MES): bar no TQ-01
+      Reservado1 : Array[0..3] of Word;   // byte 24: reservado
+      VidaClp : Word;   // byte 32 (escrita do CLP): CLP soma 1 a cada ciclo
+      EcoSeq : Word;   // byte 34 (escrita do CLP): SeqPedido do ultimo pedido recebido (copiar no mesmo ciclo em que pega o pedido)
+      Resultado : Int;   // byte 36 (escrita do CLP): do pedido recebido: 0 aceito, >0 recusado
+      Estado : Int;   // byte 38 (escrita do CLP): 0 ocioso, 1 em producao, 2 parada, 3 em falha
+      Etapa : Int;   // byte 40 (escrita do CLP): 0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver
+      OpExecucao : DInt;   // byte 42 (escrita do CLP): OP em producao (0 = nenhuma)
+      Alarme : Word;   // byte 46 (escrita do CLP): codigo do ultimo alarme/intertravamento
+      OpConcluida : DInt;   // byte 48 (escrita do CLP): ultima OP terminada: gravar POR ULTIMO, depois dos campos abaixo
+      ResultadoOp : Int;   // byte 52 (escrita do CLP): 1 concluida, 2 abortada
+      VolumeProduzido : Real;   // byte 54 (escrita do CLP): L no TQ-02
+      TemperaturaProduto : Real;   // byte 58 (escrita do CLP): graus C no fim da transferencia
+      TempoPressurizar : DInt;   // byte 62 (escrita do CLP): ms
+      TempoAquecer : DInt;   // byte 66 (escrita do CLP): ms
+      TempoTransferir : DInt;   // byte 70 (escrita do CLP): ms
+      TempoDevolver : DInt;   // byte 74 (escrita do CLP): ms
+      Reservado2 : Word;   // byte 78 (escrita do CLP): reservado
+      Assinatura : Word;   // byte 80 (assinatura): nao mudar: o MES acha o DB por ela
+      AssinaturaValor : Real;   // byte 82 (assinatura): nao mudar: o MES acha o DB por ela
+   END_STRUCT;
+
+BEGIN
+   Assinatura := 16#4D45;
+   AssinaturaValor := 4000.75;
+
+END_DATA_BLOCK
