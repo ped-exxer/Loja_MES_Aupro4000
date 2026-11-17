@@ -1,5 +1,5 @@
 {
-  "name": "@loja/gateway",
+  "name": "@aupro/gateway",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,8 +7,8 @@
     "start": "node src/main.ts"
   },
   "dependencies": {
-    "@loja/contrato-clp": "*",
-    "@loja/dominio": "*",
+    "@aupro/contrato-clp": "*",
+    "@aupro/dominio": "*",
     "nodes7": "^0.3.18"
   }
 }

@@ -1,4 +1,4 @@
-// Interface comum das "fábricas" (ROTEIRO, seção 7). A api não sabe qual está do outro lado.
+// Interface comum das "fábricas" (ROTEIRO, seção 7). O MES não sabe qual está do outro lado.
 
 /** Variáveis de processo ao vivo (na bancada, lidas do DB MB_Simulador; só leitura). */
 export type Processo = {

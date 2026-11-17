@@ -43,26 +43,38 @@ o **TQ-02** (25 L, aberto, o produto pronto). Um pedido define:
 - "Morna 10 L": 10 L a 45 °C ±2 °C
 - "Quente 15 L": 15 L a 65 °C ±2 °C
 - "Envase lento 8 L": 8 L a 55 °C, vazão 2 L/min (para mostrar tempo de ciclo)
-- "Sob medida": o cliente escolhe dentro das faixas; o sistema valida antes de aceitar
+- "Sob medida": o cliente escolhe só **volume e temperatura**, dentro das faixas; vazão e pressão são sempre as do
+  produto (o professor ajusta no catálogo). O sistema valida antes de aceitar
 
 **Entrega** = esvaziar o TQ-02 de volta ao reservatório pela VY-01. Quando e como isso acontece (direto ou esperando
 um botão na bancada) é do **programa do CLP** e não muda nada na Loja nem no MES. O TQ-02 recebe uma batelada por
 vez.
 
-Tempo de ciclo por batelada: pressurizar (~1 min) + aquecer (minutos, depende do volume e da temperatura) +
-transferir (volume ÷ vazão) + devolver (~4 min). Isso alimenta a **promessa de prazo** da Loja. A água quente volta
-ao reservatório, então a batelada seguinte começa mais quente: é isso que o sequenciamento do MES aproveita (3.3).
+Tempo de ciclo por batelada: pressurizar (~1 min, uma vez) + por rodada do TQ-01 (10 L; 15 L = 10 + 5): aquecer pelo
+TZ-104 ou resfriar pelo trocador (FV-105, ventilador M1/FY-105) até a temperatura, e só então transferir (volume da
+rodada ÷ vazão); a B1 repõe o TQ-01 com água do reservatório entre as rodadas + devolver (~4 min). A água quente volta
+ao reservatório: a batelada seguinte começa mais quente, o que adianta pedidos mais quentes e atrasa (resfriar) os
+mais frios; é isso que o sequenciamento do MES aproveita (3.3).
 
-## 3. Um sistema, uma interface: a Loja
+## 3. Dois sistemas: a Loja e o MES
 
-Para quem usa, é **um sistema só**, num endereço só: a Loja. Ela tem duas faces:
+Para quem usa, são **dois sistemas, em dois endereços**, cada um com a sua tela e o seu menu, sem login e sem papéis
+(seção 4):
 
-- **Vitrine:** catálogo, carrinho, pedido, acompanhamento, certificado.
-- **Retaguarda:** os menus do **ERP** e do **MES**, conforme o papel escolhido (sem login, seção 4).
+| Sistema | Endereço (padrão) | Menu |
+|---|---|---|
+| **Loja** (o ERP) | `http://<pc>:8080` | **Loja** (vitrine) · **Pedidos** · **Configuração** (catálogo, reiniciar a aula) |
+| **MES** | `http://<pc>:8081` | **Fila** · **Bancada** · **Qualidade** · **Indicadores** · **Configuração** (bancada, reiniciar o MES) |
 
-Por dentro, **ERP e MES são módulos separados no código**, cada um com suas tabelas e regras, conversando só por uma
-interface definida (o ERP emite e cancela ordens de produção; o MES devolve andamento e resultado). Assim a pirâmide
-fica visível na aula e, se um dia entrar um ERP de verdade ou o MES for separado, nada se reescreve.
+O topo de cada tela mostra o nome do sistema bem visível ("AUPRO4000 · Loja" e "AUPRO4000 · MES", cada um com a sua
+cor) e um botão para abrir o outro. Assim a pirâmide fica visível na aula: a vitrine e as vendas são do nível 4, a
+fila e a bancada do nível 3.
+
+Cada sistema é **um contêiner** (um processo Node que serve a própria API e a própria tela) com **a sua base** no
+MySQL. Os dois conversam **só por HTTP**, pelo contrato da seção 3.5: a Loja emite e cancela ordens de produção e
+pergunta prazos, andamento e dossiê; o MES devolve. A Loja **nunca** fala com o gateway nem lê a base do MES; o MES
+**não conhece a Loja** (não a chama: a Loja é que consulta o feed de mudanças do MES). Se um dia entrar um ERP de
+verdade, ele fala com o MES pelo mesmo contrato.
 
 **O MES não comanda a bancada.** Ele não dá partida, não suspende, não aborta, não expede: quem conduz a batelada é
 o programa do CLP. O MES só decide **a ordem** dos pedidos e entrega ao CLP **um de cada vez** (seção 6.4).
@@ -71,13 +83,15 @@ o programa do CLP. O MES só decide **a ordem** dos pedidos e entrega ao CLP **u
 
 - Catálogo com os produtos da seção 2, ilustração e prazo estimado.
 - Carrinho e pedido (cada unidade é uma batelada).
-- Checkout **sem pagamento real**: confirmação simples, opcionalmente "crédito" fictício por turma.
+- Checkout **sem pagamento real**: confirmação simples, pedindo só o nome do cliente.
 - Acompanhamento ao vivo, feito pela Loja: na fila (com a posição) → em produção (com a etapa: aquecendo,
-  envasando…) → produzido → aprovado. Mostra a temperatura e o volume subindo. Os valores vêm do CLP, lidos pelo
-  gateway (leitura, não controle).
-- Certificado da batelada (página e PDF): curva de temperatura, volume final, horários, operador, resultado.
+  resfriando, envasando…) → produzido → aprovado. Mostra a temperatura e o volume subindo. Os valores vêm do CLP,
+  lidos pelo gateway (leitura, não controle), chegam ao MES, e a Loja pergunta o andamento ao MES (a tela do
+  acompanhamento atualiza a cada 2 s).
+- Certificado da batelada (página e PDF): curva de temperatura, volume final, horários, resultado da inspeção
+  automática.
 
-### 3.2 ERP (retaguarda)
+### 3.2 ERP (a Loja: menus Pedidos e Configuração)
 
 | Função | O que faz aqui |
 |---|---|
@@ -87,7 +101,7 @@ o programa do CLP. O MES só decide **a ordem** dos pedidos e entrega ao CLP **u
 | Faturamento fictício | Nota simples quando a batelada é aprovada, valor do catálogo |
 | Cadastro de produtos e preços | O catálogo e as receitas-padrão |
 
-### 3.3 MES (retaguarda)
+### 3.3 MES (a tela do MES: menus Fila, Bancada, Qualidade e Indicadores)
 
 | Função | O que faz aqui |
 |---|---|
@@ -95,9 +109,9 @@ o programa do CLP. O MES só decide **a ordem** dos pedidos e entrega ao CLP **u
 | Sequenciamento (PCP) | Ordena a fila para aproveitar temperaturas e volumes, sem estourar prazos (regra abaixo); o PCP pode reordenar à mão |
 | Despacho | Entrega ao CLP o próximo pedido da fila; quando o CLP indica que recebeu, entrega o seguinte (seção 6.4) |
 | Coleta de dados | Lê do CLP o andamento e o resultado de cada batelada, para OEE e rastreabilidade; série temporal (TIT-104, PIT-103, FIT-102, LIT-101…) |
-| Qualidade | Comparação automática com a tolerância + inspeção do operador; aprovar/reprovar (só registro: não segura a bancada) |
-| Rastreabilidade | Genealogia: pedido, OP, receita, operador, curvas, eventos, desvios |
-| Paradas | Motivo apontado pelo operador (emergência, falta de água, PSH-103, troca de turno…) |
+| Qualidade | Inspeção **sempre automática**: aprova ou reprova pela tolerância do produto (só registro: não segura a bancada); a tela só mostra |
+| Rastreabilidade | Genealogia: pedido, OP, receita, curvas, eventos, desvios |
+| Paradas | Motivo apontado na tela da Bancada (emergência, falta de água, PSH-103, troca de turno…) |
 | Indicadores | OEE (disponibilidade × desempenho × qualidade), tempo de ciclo, lead time, % no prazo |
 | Manutenção (fase posterior) | Horas de B1/M1/resistor, partidas, ordem de manutenção |
 
@@ -107,58 +121,92 @@ o programa do CLP. O MES só decide **a ordem** dos pedidos e entrega ao CLP **u
 2. **Prazo em risco:** o MES simula a ordem por temperatura (item 3) com o tempo de ciclo estimado de cada OP; a
    que **terminaria depois do prazo menos uma margem** (padrão 5 min, na Configuração) passa na frente, a mais
    apertada primeiro. Prazo folgado não mexe na ordem por temperatura.
-3. **O resto por temperatura crescente**, a partir da temperatura da batelada em produção (ou da última): primeiro
-   as que estão na mesma temperatura ou acima dela, depois recomeça das mais frias. Esfriar é lento; a água quente
-   que volta ao reservatório adianta o aquecimento da próxima.
+3. **O resto por temperatura crescente**, a partir da temperatura do reservatório (TE-105b, lida do CLP; sem ela,
+   a da batelada em produção ou da última): primeiro as que estão na mesma temperatura ou acima dela, depois
+   recomeça das mais frias. Resfriar pelo trocador é bem mais lento que aquecer; a água quente que volta ao
+   reservatório adianta o aquecimento da próxima. A estimativa de ciclo de cada OP (prazo e sequenciamento) parte
+   da mesma temperatura do reservatório (projeção simples: a mesma para toda a fila).
 4. Desempate por **volume** (menor primeiro) e, por fim, pela ordem de chegada.
 
 Só se reordena ou cancela o que o CLP **ainda não recebeu**. A promessa de prazo da Loja é **uma só por pedido**
 (o fim estimado do último item, com 25 % de folga), para a ordem do carrinho não mexer no sequenciamento.
 
-**[DECIDIDA] Inspeção automática** (opcional, na Configuração): aprova ou reprova pela tolerância, sem pessoa. Serve
-para a Loja rodar sozinha numa demonstração; na aula, a qualidade inspeciona.
+**[DECIDIDA] Inspeção sempre automática:** quando a batelada termina, o MES aprova ou reprova pela tolerância do
+produto, sem pessoa e sem opção para desligar. Não há inspeção manual; a tela Qualidade é só leitura (pedido ×
+medido, desvio, resultado, certificado).
 
-### 3.4 Administração (professor)
+### 3.4 Configuração
 
-Catálogo (com tolerâncias), **Configuração** da bancada (driver, IP, rack, slot, número do DB `MES`), reiniciar o
-cenário da aula, exportar relatórios. A turma é um campo do cliente, informado no checkout.
+- **Na Loja:** catálogo (com tolerâncias) e **Reiniciar a aula**.
+- **No MES:** configuração da bancada (driver, IP, rack, slot, número do DB `MES`), **Reiniciar o MES**; o relatório
+  da aula (CSV) fica em Indicadores.
 
-## 4. Papéis
+**[DECIDIDA] "Reiniciar a aula" fica na Loja.** Como o MES não chama a Loja, quem apaga tudo é a Loja: primeiro pede
+ao MES que apague as ordens e os registros dele (`POST /api/admin/reiniciar` do MES) e, só se ele responder, apaga
+os pedidos, clientes e faturas dela. O MES tem o próprio "Reiniciar o MES", que só apaga o que é dele (os pedidos da
+Loja ficam sem produção). O catálogo e a configuração da bancada ficam.
 
-| Papel | Vê / faz |
-|---|---|
-| Cliente | Vitrine: compra, acompanha, baixa o certificado |
-| Vendas | ERP: pedidos, faturamento |
-| PCP | MES: fila de OPs, sequenciamento, prazos |
-| Operador | MES: tela da bancada, apontar paradas, inspeção (a operação da bancada é no painel, pelo programa do CLP) |
-| Qualidade | MES: libera ou reprova bateladas, trata desvios |
-| Professor | Tudo + administração; pode "ser" qualquer papel para demonstrar |
+### 3.5 Contrato Loja ↔ MES (HTTP)
 
-Na aula, os alunos se revezam nos papéis: é a parte didática mais valiosa.
+A Loja chama o MES pela variável `MES_URL` (no Compose, `http://mes:8081`). Formatos em
+`packages/dominio/src/integracao.ts`; rotas em `apps/mes/api/integracao.ts`.
 
-**[DECIDIDA] Sem login.** Na retaguarda, quem usa escolhe o papel num seletor e digita o próprio nome (sem senha);
-o nome vai como autor nos eventos e no certificado (ex.: operador). Na vitrine, o cliente informa nome e e-mail
-institucional no checkout.
+| Método e caminho | Corpo / resposta | Para quê |
+|---|---|---|
+| `POST /api/ordens` | `{ ordens: [{ origem, receita, tolerancias, prazo?, autor? }] }` → `201 { numeros }`; `422` com os erros por campo (`ordens.<i>.<campo>`) | Emitir as OPs de um pedido, **todas ou nenhuma** (uma transação no MES). Origem `loja:item:<id do item>` |
+| `POST /api/ordens/:numero/cancelar` | → `{ resultado: 'cancelada' \| 'pendente' }`; `409` se não pode | Cancelar (na fila: já; disponível ao CLP: depois da retirada) |
+| `POST /api/ordens/prazos` | `{ receitas }` → `{ prazos }` | Promessa de prazo de cada receita, somando a fila da frente |
+| `GET /api/ordens/andamento?numeros=1,2` | → `[{ numero, estado, prazo, posicaoFila, fimEstimado, etapa, processo, batelada }]` | Acompanhamento; `etapa` e `processo` (ao vivo) só da OP em produção |
+| `GET /api/ordens/:numero` | → dossiê (`ordem, batelada, avaliacao, inspecao, leituras, eventos`) ou `404` | Certificado |
+| `GET /api/ordens/mudancas?desde=<cursor>` | → `{ mudancas: [{ id, numero, origem, estado, horario }], ultimo }` | **Feed de mudanças**: cada mudança de estado de OP, com `id` crescente (o cursor) |
+| `POST /api/admin/reiniciar` | → `{ ok }` | "Reiniciar a aula" da Loja |
+
+- **Feed, não chamada de volta:** a Loja consulta `/api/ordens/mudancas` a cada 1 s e guarda o último `id` na base
+  dela (`erp_integracao`). Assim nada se perde se um dos dois reiniciar: ela continua de onde parou. O que ela faz
+  com cada mudança é idempotente (batelada **aprovada** vira fatura, uma por item; avisa a vitrine). Se o cursor
+  dela passar de `ultimo` (a base do MES foi recriada), recomeça do zero.
+- **MES fora do ar:** a Loja responde `503 { erro: 'mes_fora_do_ar' }` (a tela traduz). No checkout, o pedido é
+  gravado numa transação que só termina depois que o MES emitiu as OPs: se o MES não responde, nada fica gravado.
+  A vitrine abre sem os prazos, com um aviso; os pedidos aparecem sem o andamento até o MES voltar.
+- Cada tela recebe avisos **do seu sistema** (SSE em `/api/eventos`): a do MES, `ordem`, `bancada`, `parada`; a da
+  Loja, `pedido` e `producao` (este quando o feed traz mudanças).
+
+## 4. Sem papéis
+
+**[DECIDIDA] Sem login e sem papéis.** Todas as telas dos dois sistemas ficam abertas a quem as usa; ninguém
+escolhe papel nem informa o próprio nome. Os registros feitos pelas telas ficam sem autor; o que o próprio MES faz
+(envio ao CLP, conclusão, inspeção automática) fica assinado como `MES`. Na vitrine, o cliente informa só o nome no
+checkout (sem e-mail nem turma).
+
+Na aula, os alunos podem se revezar nas telas (vendas, PCP, bancada, qualidade): a divisão é combinada na aula, não
+imposta pelo sistema. A operação da bancada é no painel, pelo programa do CLP.
 
 ## 5. Implantação: tudo num Docker Compose
 
 Um `docker compose up` num PC da escola, na mesma rede da bancada, sobe tudo:
 
 ```
- Navegadores (vitrine, ERP, MES)
-            │ HTTP + WebSocket
- ┌──────────┴───────────────────────────────────────────┐
- │ loja-web   interface única (vitrine + retaguarda)    │
- │ api        backend: módulo ERP + módulo MES          │
- │ gateway    driver S7 PUT/GET (e driver simulado)     │──── ISO-on-TCP, porta 102 ──── S7-1200
- │ banco      MySQL                                     │
- └──────────────────────────────────────────────────────┘
+ Navegadores
+   │ HTTP + SSE                       │ HTTP + SSE
+ ┌─┴────────────────────────────────┐ ┌┴─────────────────────────────────────────┐
+ │ loja   :8080  API do ERP + tela  │─▶ mes    :8081  API do MES + tela          │
+ │        (vitrine, pedidos, …)     │ │        (fila, bancada, qualidade, …)     │
+ └──────────┬───────────────────────┘ └──────┬──────────────┬────────────────────┘
+            │ base "loja"                    │ base "mes"   │ HTTP
+ ┌──────────┴────────────────────────────────┴──┐ ┌─────────┴──────────────────────────┐
+ │ banco  MySQL, um usuário para cada base       │ │ gateway  driver S7 / simulado      │── porta 102 ── S7-1200
+ └───────────────────────────────────────────────┘ └────────────────────────────────────┘
 ```
 
-- O **gateway** é o único que fala com o CLP. Fica num contêiner próprio porque é a parte que muda com o hardware.
+- Quatro serviços (`loja`, `mes`, `gateway`, `banco`), todos com healthcheck (`/api/saude` na Loja e no MES,
+  `/saude` no gateway, `mysqladmin ping` no banco), `depends_on` por saúde e `restart: unless-stopped`. Portas no PC:
+  `PORTA_LOJA` (8080) e `PORTA_MES` (8081); gateway e banco ficam só na rede interna.
+- O banco é **um MySQL com duas bases**, `loja` e `mes`, criadas na primeira subida por
+  `docker/banco/01-bases.sql`, cada uma com o seu usuário e permissão só nela.
+- O **gateway** é o único que fala com o CLP, e só o **MES** fala com o gateway. Fica num contêiner próprio porque é a parte que muda com o hardware.
 - O contêiner do gateway precisa alcançar o IP da CPU (rede do Docker em modo `bridge` com rota para a LAN, ou
   `host`). Documentar no guia de instalação.
-- Volume persistente para o banco; backup é exportar o volume.
+- Volume persistente para o banco; backup é exportar as duas bases (guia de instalação).
 - **[DECIDIDA]** Totalmente **offline**: sem nuvem, sem integração com o Exxer Cloud, sem licenciamento.
 - **[DECIDIDA]** **Uma Loja/MES por bancada**: cada instalação atende uma bancada só.
 
@@ -185,7 +233,7 @@ escola é aceitável; o guia de instalação tem que dizer isso.
   **ler** dele as variáveis de processo (40001 = `DBW0`, big-endian; tabela em `docs/05-comunicacao-modbus.md` do
   Simmaq 3DX).
 - O MES escreve **só** na sua área de escrita do DB `MES` (bytes 0–23), num pedido só.
-- O S7-1200 aceita várias conexões ao mesmo tempo; o gateway abre **uma** e todos os módulos usam ela.
+- O S7-1200 aceita várias conexões ao mesmo tempo; o gateway abre **uma**, e só o MES a usa.
 - **[DECIDIDA]** Não há "modo MES": o MES não comanda a bancada, só deixa o próximo pedido disponível. Quando
   pegá-lo é decisão do programa do CLP.
 
@@ -208,7 +256,7 @@ de escrever.
 | 16 | SpVazao | Real | L/min no envase |
 | 20 | SpPressao | Real | bar no TQ-01 |
 
-**Leitura do MES, escrita pelo CLP (bytes 32–79)**
+**Leitura do MES, escrita pelo CLP (bytes 32–95)**
 
 | Byte | Nome | Tipo | Significado |
 |---|---|---|---|
@@ -216,23 +264,27 @@ de escrever.
 | 34 | EcoSeq | Word | `SeqPedido` do último pedido que o CLP **recebeu** (pegou para produzir) |
 | 36 | Resultado | Int | Do pedido recebido: 0 aceito; >0 recusado (ex.: fora da faixa) |
 | 38 | Estado | Int | Informativo: 0 ocioso, 1 em produção, 2 parada, 3 em falha |
-| 40 | Etapa | Int | Informativo: 0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver |
+| 40 | Etapa | Int | Informativo: 0 nenhuma, 1 pressurizar, 2 aquecer, 3 transferir, 4 aguardar, 5 devolver, 6 resfriar |
 | 42 | OpExecucao | DInt | OP em produção (0 = nenhuma) |
 | 46 | Alarme | Word | Código do último alarme/intertravamento |
 | 48 | OpConcluida | DInt | Última OP que terminou; os campos abaixo são dela |
 | 52 | ResultadoOp | Int | 1 concluída, 2 abortada |
 | 54 | VolumeProduzido | Real | L no TQ-02 |
-| 58 | TemperaturaProduto | Real | °C no fim da transferência |
+| 58 | TemperaturaProduto | Real | °C no TQ-02 (TE-105a) no fim da transferência |
 | 62 | TempoPressurizar | DInt | ms |
 | 66 | TempoAquecer | DInt | ms |
 | 70 | TempoTransferir | DInt | ms |
 | 74 | TempoDevolver | DInt | ms |
-| 78–79 | reservado | | |
+| 78 | TempoResfriar | DInt | ms (trocador) |
+| 82 | TemperaturaTq02 | Real | TE-105a ao vivo |
+| 86 | TemperaturaReservatorio | Real | TE-105b ao vivo |
+| 90–95 | reservado | | |
 
 O CLP grava o bloco da OP concluída de uma vez, com `OpConcluida` por último; o MES percebe a mudança de
-`OpConcluida` e registra a batelada. As variáveis de processo ao vivo (temperatura, nível…) vêm do `MB_Simulador`.
+`OpConcluida` e registra a batelada. As variáveis de processo ao vivo (temperatura, nível…) vêm do `MB_Simulador`, exceto TE-105a/b, que o CLP escreve
+no DB `MES`.
 
-**Assinatura (bytes 80–85):** `Assinatura : Word := 16#4D45` ("ME") e `AssinaturaValor : Real := 4000.75`. O gateway
+**Assinatura (bytes 96–101):** `Assinatura : Word := 16#4D45` ("ME") e `AssinaturaValor : Real := 4000.75`. O gateway
 procura o DB que tem esses valores.
 
 ### 6.4 Aperto de mão (handshake)
@@ -258,7 +310,7 @@ produzir**.
    "comunicação perdida", **nunca** para "concluída". O que fazer se `VidaMes` parar é do programa do CLP
    (sugestão: não pegar pedido novo).
 7. **O CLP perdeu a batelada** (reset da CPU, por exemplo): a OP ficaria "em produção" para sempre. Com o CLP
-   respondendo e sem estar com ela, o operador pode **registrá-la como abortada** (tela da OP). É só registro.
+   respondendo e sem estar com ela, dá para **registrá-la como abortada** (tela da OP). É só registro.
 8. O CLP recusa receita fora das faixas da seção 2, mesmo que o MES já tenha validado (dupla checagem).
 
 ### 6.5 Mudança no programa do CLP
@@ -288,8 +340,8 @@ a primeira tarefa de integração (fase 4) é uma prova na bancada.
 | Simmaq 3DX (AUPRO4000 virtual) | Escola sem bancada, casa, demonstração | O Simmaq 3DX expor o DB `MES` (tarefa futura **naquele** projeto, não aqui) |
 | Simulador embutido no gateway | Desenvolvimento e testes automatizados | Um modelo simples (tempo de aquecer/encher) atrás da mesma interface |
 
-A api não sabe qual delas está do outro lado: fala só com o gateway, que tem um **driver por fábrica**. Começar pelo
-simulador embutido permite desenvolver tudo sem bancada. Um driver OPC UA pode entrar depois sem mudar a api.
+O MES não sabe qual delas está do outro lado: fala só com o gateway, que tem um **driver por fábrica**. Começar pelo
+simulador embutido permite desenvolver tudo sem bancada. Um driver OPC UA pode entrar depois sem mudar o MES.
 
 ## 8. Stack
 
@@ -297,29 +349,36 @@ simulador embutido permite desenvolver tudo sem bancada. Um driver OPC UA pode e
 
 - **TypeScript em tudo**, monorepo (npm workspaces), **Node 24** rodando o `.ts` direto (remoção de tipos nativa,
   sem etapa de build no back-end; só sintaxe "apagável": nada de `enum` nem `namespace`).
-  - `apps/web`: React + Vite, a Loja (vitrine e retaguarda com rotas por papel)
-  - `apps/api`: Node + Fastify, com `modulos/erp` e `modulos/mes` separados
+  - `apps/loja`: a Loja (ERP). `api/` (Node + Fastify) e `web/` (React + Vite, rotas por hash)
+  - `apps/mes`: o MES. `api/` (Node + Fastify: ordens, fila, despacho, qualidade, indicadores, contrato com a Loja) e
+    `web/` (React + Vite)
   - `apps/gateway`: Node, drivers `s7` e `simulado`
   - `packages/dominio`: tipos, máquina de estados da OP, validação da receita, cálculo do OEE
   - `packages/contrato-clp`: o layout do DB `MES` (seção 6.3) num lugar só, usado pelo gateway e pelos testes
+  - `packages/servidor`: infraestrutura comum aos dois back-ends (banco, SSE, rotas, a tela servida pelo próprio
+    processo); `packages/interface`: o comum às duas telas (chamadas à API, SSE, formatação, componentes, estilo,
+    textos comuns e o topo). Os textos e as páginas de cada sistema ficam no app dele
 - **MySQL 8**; série temporal numa tabela própria.
 - **Testes:** `node:test` nativo, sem framework; `scripts/ponta-a-ponta.mjs` testa a pilha no ar com o simulador.
-- **Tempo real:** **Server-Sent Events** da api para as telas (texto sobre HTTP, sem dependência; as telas só
-  recebem avisos e buscam o resto pela API). Entre api e gateway, **HTTP simples**: o laço do despacho fica na api,
-  que lê e grava pelo gateway a cada 0,5 s. Assim, se a api parar, `VidaMes` para e o CLP percebe. **Sem MQTT, sem
+- **Tempo real:** **Server-Sent Events** de cada sistema para a sua tela (texto sobre HTTP, sem dependência; as telas só
+  recebem avisos e buscam o resto pela API). Entre MES e gateway, **HTTP simples**: o laço do despacho fica no
+  MES, que lê e grava pelo gateway a cada 0,5 s. Assim, se o MES parar, `VidaMes` para e o CLP percebe. Entre Loja e
+  MES, **HTTP** pelo contrato da seção 3.5, com o feed de mudanças por cursor. **Sem MQTT, sem
   WebSocket.**
-- **Dependências:** fastify e mysql2 (api), nodes7 (gateway), react, react-dom e vite (web).
+- **Dependências:** fastify e mysql2 (Loja e MES), nodes7 (gateway), react, react-dom e vite (telas). A tela de cada
+  sistema é servida pelo próprio processo Node, com `node:fs` (sem nginx e sem `@fastify/static`).
 - **Idiomas:** pt-BR primeiro, textos já separados para en e es.
 
 ## 9. Modelo de dados (primeiro corte)
 
-- Comum: `configuracao` (uma linha só: driver, IP, rack/slot, DBs, velocidade do simulador, margem de prazo,
-  inspeção automática, início da aula)
-- ERP: `erp_cliente` (nome, e-mail, turma), `erp_produto` (preço, receita, tolerâncias, sob medida), `erp_pedido` →
-  `erp_item` (uma linha por unidade, com a receita copiada e a OP), `erp_fatura`
-- MES: `OrdemProducao` (estado, posição fixada pelo PCP, prazo, item de pedido de origem), `Batelada` (volume,
-  temperatura, tempos por etapa, aprovada?), `Leitura` (batelada, variável, horário, valor), `Evento` (alarmes,
-  envios, mudanças de estado, com horário e autor), `Parada`, `Inspecao`
+- Base `mes`: `configuracao` (uma linha só: driver, IP, rack/slot, DBs, velocidade do simulador, margem de prazo,
+  início da aula)
+- Base `loja` (ERP): `erp_integracao` (cursor do feed de mudanças do MES), `erp_cliente` (só o nome, um registro por pedido; e-mail e turma ficaram como colunas nulas), `erp_produto`
+  (preço, receita, tolerâncias, sob medida), `erp_pedido` → `erp_item` (uma linha por unidade, com a receita copiada
+  e a OP), `erp_fatura`
+- Base `mes` (MES): `mes_mudanca` (feed para a Loja), `OrdemProducao` (estado, posição fixada pelo PCP, prazo, item de pedido de origem), `Batelada` (volume,
+  temperatura, tempos por etapa, inclusive resfriar, aprovada?), `Leitura` (batelada, variável, horário, valor), `Evento` (alarmes,
+  envios, mudanças de estado, com horário; autor só `MES`), `Parada`, `Inspecao` (sempre automática)
 
 **[DECIDIDA] Máquina de estados da OP** (`packages/dominio`). Como o MES não comanda a bancada, os estados depois
 do envio só mudam pelo que o CLP informa:
@@ -351,9 +410,10 @@ do envio só mudam pelo que o CLP informa:
 | 5 | Simmaq 3DX como fábrica (projeto do Simmaq) | A mesma aula sem bancada | — |
 | 6 | Manutenção, driver OPC UA | Conforme a demanda | — |
 
-As fases 1 a 3 passam no `scripts/ponta-a-ponta.mjs` (pedido → sequenciamento → produção → inspeção → fatura →
-certificado → cancelamento → queda de comunicação → OP abortada → OEE e CSV), e o MES foi testado reiniciando a api
-e o gateway no meio da produção (reconcilia sem perder nem duplicar OP).
+As fases 1 a 3 passam no `scripts/ponta-a-ponta.mjs` (pedido → sequenciamento → produção → inspeção automática → fatura →
+certificado → cancelamento → queda de comunicação → OP abortada → OEE e CSV), e o MES foi testado reiniciando o MES
+e o gateway no meio da produção (reconcilia sem perder nem duplicar OP). Depois da separação em dois sistemas, o
+mesmo script recebe as duas URLs e confere também a Loja recusando o pedido com o MES parado.
 
 ## 11. Decisões
 
@@ -365,13 +425,19 @@ e o gateway no meio da produção (reconcilia sem perder nem duplicar OP).
    DB pela assinatura é feita no gateway, por cima dela (seção 6.6). Só entra na fase 4.
 4. **[DECIDIDA]** Stack: seção 8 (MySQL, sem MQTT, o mínimo de dependências).
 5. **[DECIDIDA]** Totalmente offline, sem nuvem nem Exxer Cloud.
-6. **[DECIDIDA]** Sem licenciamento e sem nome de produto: o topo da interface mostra **AUPRO4000**.
+6. **[DECIDIDA]** Sem licenciamento e sem nome de produto: o topo mostra **AUPRO4000 · Loja** ou **AUPRO4000 · MES**.
 7. **[DECIDIDA]** Uma Loja/MES por bancada.
-8. **[DECIDIDA]** Sem login: seletor de papel e nome, sem senha (seção 4).
+8. **[DECIDIDA]** Sem login e sem papéis: ninguém se identifica (seção 4).
 9. **[ABERTA]** Códigos de `Resultado` > 0 (motivos de recusa do CLP) e de `Alarme`: definir com o programa do CLP.
-10. **[ABERTA]** Parâmetros da estimativa de ciclo (`packages/dominio/src/ciclo.ts`: 60 s pressurizar,
-    1,4 s por °C e por litro, 240 s devolver): medir na bancada e ajustar. Eles alimentam a promessa de prazo, o
-    sequenciamento e o desempenho do OEE.
+10. **[ABERTA]** Parâmetros da estimativa de ciclo (`packages/dominio/src/ciclo.ts`: 60 s pressurizar, 1,4 s/°C/L
+    aquecer, 8 s/°C/L resfriar, 240 s devolver, TQ-01 de 10 L): medir na bancada e ajustar. A potência do resistor
+    TZ-104 ainda não é conhecida (pergunta enviada ao projetista).
+11. **[DECIDIDA]** **Dois sistemas, dois contêineres, dois endereços** (seções 3 e 5): Loja (ERP) e MES, cada um com
+    a sua tela, a sua base e o seu usuário no MySQL. Conversam só por HTTP (contrato da seção 3.5); só o MES fala com
+    o gateway. Substitui o "um sistema, uma interface" do primeiro corte.
+12. **[DECIDIDA]** A Loja fica sabendo das mudanças do MES por um **feed com cursor** (`/api/ordens/mudancas`),
+    consultado a cada 1 s, e não por chamada do MES à Loja: o MES não conhece a Loja e nada se perde se um dos dois
+    reiniciar. "Reiniciar a aula" fica na Loja (seção 3.4).
 
 ## 12. Referências no Simmaq 3DX (só consulta)
 

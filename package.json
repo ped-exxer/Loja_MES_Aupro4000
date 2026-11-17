@@ -7,11 +7,14 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
-    "tipos": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "dev:api": "node --watch apps/api/src/main.ts",
+    "test": "node --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"apps/*/api/**/*.test.ts\"",
+    "tipos": "tsc -p tsconfig.json && tsc -p apps/loja/web/tsconfig.json && tsc -p apps/mes/web/tsconfig.json",
+    "build": "npm run build -w @aupro/loja && npm run build -w @aupro/mes",
+    "dev:loja": "node --watch apps/loja/api/main.ts",
+    "dev:mes": "node --watch apps/mes/api/main.ts",
     "dev:gateway": "node --watch apps/gateway/src/main.ts",
-    "dev:web": "npm run dev -w @loja/web",
+    "dev:loja-web": "npm run dev -w @aupro/loja",
+    "dev:mes-web": "npm run dev -w @aupro/mes",
     "db-mes": "node scripts/gerar-db-mes.ts",
     "ponta-a-ponta": "node scripts/ponta-a-ponta.mjs"
   },

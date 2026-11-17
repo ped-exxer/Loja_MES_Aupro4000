@@ -1,54 +1,100 @@
-# Sobe a Loja inteira num PC da escola, offline: docker compose up --build
-# Abrir http://localhost:8080 (outra porta: PORTA_LOJA=8090 docker compose up)
+# AUPRO4000: dois sistemas, dois endereços, num PC da escola, offline.  docker compose up -d --build
+#   Loja  http://localhost:8080   (outra porta: PORTA_LOJA)
+#   MES   http://localhost:8081   (outra porta: PORTA_MES)
 #
-# Senhas fixas: a instalação é offline e local. Troque-as se o PC estiver numa rede compartilhada.
+#   navegador ──▶ loja ──HTTP (MES_URL)──▶ mes ──HTTP──▶ gateway ──S7 PUT/GET──▶ CLP
+#                   └──── base "loja" ─┐     └── base "mes"
+#                                    banco (um MySQL, duas bases, um usuário para cada)
+#
+# Senhas fixas: a instalação é offline e local. Troque-as (aqui e em docker/banco/01-bases.sql) se o PC estiver
+# numa rede compartilhada.
 
 services:
-  banco:
-    image: mysql:8.4
+  # Loja (ERP): vitrine, pedidos, faturas, catálogo, certificado. API + tela no mesmo processo.
+  # Fala com o MES só por HTTP; nunca com o gateway nem com a base do MES.
+  loja:
+    build: { context: ., target: loja }
+    ports:
+      - "${PORTA_LOJA:-8080}:8080"
     environment:
-      MYSQL_DATABASE: loja
-      MYSQL_USER: loja
-      MYSQL_PASSWORD: loja
-      MYSQL_ROOT_PASSWORD: loja-root
-    volumes:
-      - dados-banco:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uloja", "-ploja"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-    restart: unless-stopped
-
-  gateway:
-    build: { context: ., target: gateway }
-    environment:
-      PORTA: 4000
-      DRIVER: simulado
-    # Fase 4 (driver s7): o contêiner precisa alcançar o IP da CPU na porta 102.
-    # Se a rede bridge não tiver rota para a LAN da bancada, use network_mode: host.
-    restart: unless-stopped
-
-  api:
-    build: { context: ., target: api }
-    environment:
-      PORTA: 3000
-      GATEWAY_URL: http://gateway:4000
+      PORTA: 8080
+      MES_URL: http://mes:8081
+      # link "Abrir o MES" no topo da tela: vazio = mesmo endereço da página, na porta do MES
+      MES_URL_PUBLICA: ${MES_URL_PUBLICA:-}
+      MES_PORTA_PUBLICA: ${PORTA_MES:-8081}
       BANCO_HOST: banco
       BANCO_USUARIO: loja
       BANCO_SENHA: loja
       BANCO_NOME: loja
     depends_on:
       banco: { condition: service_healthy }
-      gateway: { condition: service_started }
+      mes: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/saude"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
-  loja-web:
-    build: { context: ., target: loja-web }
+  # MES: fila, sequenciamento, despacho ao CLP, qualidade, indicadores, configuração da bancada. API + tela.
+  # O único que fala com o gateway. Não conhece a Loja: ela pergunta (feed /api/ordens/mudancas).
+  mes:
+    build: { context: ., target: mes }
     ports:
-      - "${PORTA_LOJA:-8080}:80"
+      - "${PORTA_MES:-8081}:8081"
+    environment:
+      PORTA: 8081
+      GATEWAY_URL: http://gateway:4000
+      # link "Abrir a Loja" no topo da tela: vazio = mesmo endereço da página, na porta da Loja
+      LOJA_URL_PUBLICA: ${LOJA_URL_PUBLICA:-}
+      LOJA_PORTA_PUBLICA: ${PORTA_LOJA:-8080}
+      BANCO_HOST: banco
+      BANCO_USUARIO: mes
+      BANCO_SENHA: mes
+      BANCO_NOME: mes
     depends_on:
-      - api
+      banco: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/api/saude"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # Gateway: o único que fala com o CLP. Driver simulado (padrão) ou S7; o MES troca pela tela de Configuração.
+  # Driver s7: o contêiner precisa alcançar o IP da CPU na porta 102. Se a rede bridge não tiver rota para a LAN
+  # da bancada, use network_mode: host (docs/instalacao.md).
+  gateway:
+    build: { context: ., target: gateway }
+    environment:
+      PORTA: 4000
+      DRIVER: simulado
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/saude"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # Banco: um MySQL com duas bases ("loja" e "mes"), criadas na primeira subida por docker/banco/01-bases.sql.
+  banco:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: loja-root
+    volumes:
+      - dados-banco:/var/lib/mysql
+      - ./docker/banco:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # 127.0.0.1 (TCP): durante a inicialização o MySQL só escuta pelo socket, então só passa quando estiver pronto
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

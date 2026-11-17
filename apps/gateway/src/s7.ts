@@ -2,7 +2,7 @@
 // AINDA NÃO PROVADO NUMA CPU REAL: é a primeira tarefa da fase 4.
 
 import NodeS7 from 'nodes7';
-import { AREA_ASSINATURA, AREA_ESCRITA, TAMANHO_DB, conferirAssinatura } from '@loja/contrato-clp';
+import { AREA_ASSINATURA, AREA_ESCRITA, TAMANHO_DB, conferirAssinatura } from '@aupro/contrato-clp';
 import type { ConfiguracaoDriver, DbsEncontrados, Driver, Processo } from './driver.ts';
 
 const PORTA_S7 = 102;

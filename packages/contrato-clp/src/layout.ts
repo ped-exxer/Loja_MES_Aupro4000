@@ -13,12 +13,12 @@ export type Area = { readonly inicio: number; readonly tamanho: number };
 
 /** Área que o MES escreve, num pedido só: o próximo pedido disponível. */
 export const AREA_ESCRITA: Area = { inicio: 0, tamanho: 24 };
-/** Área escrita pelo CLP e lida pelo MES. */
-export const AREA_LEITURA: Area = { inicio: 32, tamanho: 48 };
-/** Assinatura que identifica o DB `MES`. */
-export const AREA_ASSINATURA: Area = { inicio: 80, tamanho: 6 };
+/** Área escrita pelo CLP e lida pelo MES (bytes 32–95; 90–95 reservados para crescer). */
+export const AREA_LEITURA: Area = { inicio: 32, tamanho: 64 };
+/** Assinatura que identifica o DB `MES` (bytes 96–101), depois da área do CLP. */
+export const AREA_ASSINATURA: Area = { inicio: 96, tamanho: 6 };
 /** Tamanho mínimo do DB. */
-export const TAMANHO_DB = 86;
+export const TAMANHO_DB = 102;
 
 export const CAMPOS_ESCRITA = {
   VidaMes: { byte: 0, tipo: 'Word' },
@@ -45,18 +45,29 @@ export const CAMPOS_LEITURA = {
   /** Última OP que terminou; os campos seguintes são dela. */
   OpConcluida: { byte: 48, tipo: 'DInt' },
   ResultadoOp: { byte: 52, tipo: 'Int' },
+  /** L no TQ-02 (LIT-101) no fim da transferência. */
   VolumeProduzido: { byte: 54, tipo: 'Real' },
+  /** °C no TQ-02 (TE-105a) no fim da transferência. */
   TemperaturaProduto: { byte: 58, tipo: 'Real' },
   TempoPressurizar: { byte: 62, tipo: 'DInt' },
+  /** ms aquecendo (soma das rodadas). */
   TempoAquecer: { byte: 66, tipo: 'DInt' },
+  /** ms transferindo (soma das rodadas). */
   TempoTransferir: { byte: 70, tipo: 'DInt' },
   TempoDevolver: { byte: 74, tipo: 'DInt' },
-  // 78–79 reservado
+  /** ms resfriando pelo trocador (soma das rodadas; 0 se não precisou). */
+  TempoResfriar: { byte: 78, tipo: 'DInt' },
+  // Ao vivo, escritos pelo CLP a cada ciclo (não existem no DB MB_Simulador):
+  /** °C da água no TQ-02, o produto pronto (TE-105a). */
+  TemperaturaTq02: { byte: 82, tipo: 'Real' },
+  /** °C da água do reservatório (TE-105b). */
+  TemperaturaReservatorio: { byte: 86, tipo: 'Real' },
+  // 90–95 reservado
 } as const satisfies Record<string, Campo>;
 
 export const CAMPOS_ASSINATURA = {
-  Assinatura: { byte: 80, tipo: 'Word' },
-  AssinaturaValor: { byte: 82, tipo: 'Real' },
+  Assinatura: { byte: 96, tipo: 'Word' },
+  AssinaturaValor: { byte: 98, tipo: 'Real' },
 } as const satisfies Record<string, Campo>;
 
 export const VALORES_ASSINATURA = { Assinatura: 0x4d45, AssinaturaValor: 4000.75 } as const;
@@ -80,6 +91,8 @@ export const ETAPA = {
   transferir: 3,
   aguardar: 4,
   devolver: 5,
+  /** Recircular o TQ-01 pelo trocador (FV-105, M1) até baixar à temperatura do pedido. */
+  resfriar: 6,
 } as const;
 
 /** `Resultado` = 0 é aceito; > 0 é recusa (os motivos ficam com o programa do CLP). */

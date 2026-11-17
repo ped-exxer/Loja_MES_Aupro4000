@@ -10,7 +10,8 @@ import {
   conferirAssinatura,
   decodificarLeitura,
   type ValoresEscrita,
-} from '@loja/contrato-clp';
+} from '@aupro/contrato-clp';
+import { estimarEtapas } from '@aupro/dominio';
 import { ClpSimulado, RECUSA_FORA_DA_FAIXA } from './simulado.ts';
 
 const leitura = (clp: ClpSimulado) =>
@@ -116,17 +117,80 @@ test('falha "congelar" para a vida do CLP; "abortar" publica a OP abortada', () 
   assert.equal(l.Etapa, ETAPA.nenhuma);
 });
 
-test('a água quente devolvida aquece o reservatório', () => {
+/** Roda como `rodar`, guardando a sequência de etapas (sem repetições) e o maior TemperaturaTq02 visto. */
+function rodarObservando(clp: ClpSimulado, ms: number, vidaMes: { v: number }, escrita: Partial<ValoresEscrita>) {
+  const etapas: number[] = [];
+  for (let t = 0; t < ms; t += 100) {
+    rodar(clp, 100, vidaMes, escrita);
+    const e = leitura(clp).Etapa;
+    if (etapas.at(-1) !== e) etapas.push(e);
+  }
+  return etapas;
+}
+
+test('pedido de 15 L: duas rodadas do TQ-01 (aquecer → transferir duas vezes), pressuriza e devolve uma vez', () => {
   const clp = new ClpSimulado({ escala: 100, aleatorio: () => 0.5 });
-  rodar(clp, 15_000, { v: 0 }, { ...pedido, SpTemperatura: 65, SpVolume: 15 }); // ciclo ~13,8 s
-  assert.equal(leitura(clp).OpConcluida, 7);
-  assert.ok(clp.temperaturaReservatorio > 30, `reservatório a ${clp.temperaturaReservatorio}`);
+  const receita = { volume: 15, temperatura: 45, vazao: 4, pressao: 2 };
+  const vida = { v: 0 };
+  const etapas = rodarObservando(clp, 20_000, vida, {
+    ...pedido, SpVolume: receita.volume, SpTemperatura: receita.temperatura,
+  });
+  const E = ETAPA;
+  assert.deepEqual(etapas, [E.pressurizar, E.aquecer, E.transferir, E.aquecer, E.transferir, E.aguardar, E.devolver, E.nenhuma]);
+  const l = leitura(clp);
+  assert.equal(l.OpConcluida, 7);
+  assert.ok(Math.abs(l.VolumeProduzido - 15) <= 0.2);
+  assert.ok(Math.abs(l.TemperaturaProduto - 45) <= 1, `produto a ${l.TemperaturaProduto}`);
+  assert.equal(l.TempoResfriar, 0);
+  // o tempo de aquecer segue a estimativa por rodadas (10 L e depois 5 L, ambas do reservatório a 25 °C)
+  const estimado = estimarEtapas(receita, 25, 25).aquecerMs / 100;
+  assert.ok(Math.abs(l.TempoAquecer - estimado) / estimado < 0.05, `aqueceu ${l.TempoAquecer} ms, estimado ${estimado}`);
 });
 
-test('reservatório quente demais: o produto sai mais quente que o pedido', () => {
+test('reservatório mais quente que o pedido: resfria pelo trocador e o produto sai na temperatura pedida', () => {
   const clp = new ClpSimulado({ escala: 100, aleatorio: () => 0.5 });
   clp.temperaturaReservatorio = 60;
+  const etapas = rodarObservando(clp, 30_000, { v: 0 }, pedido); // 10 L a 45 °C
+  assert.ok(etapas.includes(ETAPA.resfriar), `etapas: ${etapas}`);
+  assert.ok(!etapas.includes(ETAPA.aquecer), `etapas: ${etapas}`);
+  const l = leitura(clp);
+  assert.equal(l.OpConcluida, 7);
+  assert.ok(Math.abs(l.TemperaturaProduto - 45) <= 1, `produto a ${l.TemperaturaProduto}`);
+  assert.ok(l.TempoResfriar > 0);
+  assert.equal(l.TempoAquecer, 0);
+});
+
+test('água já na temperatura: transfere direto, sem aquecer nem resfriar', () => {
+  const clp = new ClpSimulado({ escala: 100, aleatorio: () => 0.5 });
   const vida = { v: 0 };
-  rodar(clp, 60_000, vida, pedido);
-  assert.ok(leitura(clp).TemperaturaProduto >= 59);
+  rodar(clp, 100, vida, pedido); // pega o pedido (10 L a 45 °C) e começa a pressurizar
+  assert.equal(leitura(clp).Etapa, ETAPA.pressurizar);
+  clp.processo.temperatura = 45; // a água do TQ-01 já está a 45 °C
+  const etapas = rodarObservando(clp, 10_000, vida, pedido);
+  assert.deepEqual(etapas.slice(0, 2), [ETAPA.pressurizar, ETAPA.transferir]);
+  const l = leitura(clp);
+  assert.equal(l.OpConcluida, 7);
+  assert.equal(l.TempoAquecer, 0);
+  assert.equal(l.TempoResfriar, 0);
+});
+
+test('TemperaturaTq02 acompanha o envase e TemperaturaReservatorio sobe depois de devolver água quente', () => {
+  const clp = new ClpSimulado({ escala: 100, aleatorio: () => 0.5 });
+  const vida = { v: 0 };
+  const quente = { ...pedido, SpTemperatura: 65, SpVolume: 15 };
+  assert.equal(leitura(clp).TemperaturaReservatorio, 25);
+  assert.equal(leitura(clp).TemperaturaTq02, 25);
+
+  let maiorTq02 = 0;
+  for (let t = 0; t < 15_000; t += 100) { // ciclo ~13,8 s
+    rodar(clp, 100, vida, quente);
+    maiorTq02 = Math.max(maiorTq02, leitura(clp).TemperaturaTq02);
+  }
+  const l = leitura(clp);
+  assert.equal(l.OpConcluida, 7);
+  // a 1ª rodada esfria um pouco no TQ-02 enquanto a 2ª aquece: o produto sai um pouco abaixo, dentro de ±2 °C
+  assert.ok(l.TemperaturaProduto < 65 && 65 - l.TemperaturaProduto <= 2, `produto a ${l.TemperaturaProduto}`);
+  assert.ok(maiorTq02 > 63 && maiorTq02 <= 65.01, `TQ-02 chegou a ${maiorTq02}`);
+  assert.ok(l.TemperaturaReservatorio > 30, `reservatório a ${l.TemperaturaReservatorio}`);
+  assert.ok(Math.abs(l.TemperaturaReservatorio - clp.temperaturaReservatorio) < 1e-3);
 });

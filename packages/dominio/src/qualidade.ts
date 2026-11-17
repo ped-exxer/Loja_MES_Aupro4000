@@ -1,5 +1,5 @@
 // Comparação automática da batelada com as tolerâncias do produto (ROTEIRO, seção 3.3, Qualidade).
-// É uma sugestão: quem aprova ou reprova é a pessoa da qualidade.
+// O MES aprova ou reprova sozinho por esta comparação (inspeção sempre automática).
 
 import type { Receita, Tolerancias } from './receita.ts';
 

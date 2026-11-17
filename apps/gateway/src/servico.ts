@@ -10,7 +10,7 @@ import {
   decodificarLeitura,
   type ValoresEscrita,
   type ValoresLeitura,
-} from '@loja/contrato-clp';
+} from '@aupro/contrato-clp';
 import type { ConfiguracaoDriver, DbsEncontrados, Driver, Processo } from './driver.ts';
 import { DriverSimulado, type FalhaSimulada } from './simulado.ts';
 import { DriverS7 } from './s7.ts';

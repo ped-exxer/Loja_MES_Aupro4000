@@ -1,5 +1,5 @@
 // Gateway: o único que fala com o CLP (ROTEIRO, seção 5). Um driver por fábrica: simulado ou s7.
-// HTTP simples, só para a api:
+// HTTP simples, só para o MES (a Loja não fala com o gateway):
 //   GET  /saude               situação da conexão
 //   GET  /leitura             DB MES decodificado + variáveis de processo
 //   PUT  /escrita             grava a área de escrita do MES (ValoresEscrita)

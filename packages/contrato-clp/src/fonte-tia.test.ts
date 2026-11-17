@@ -22,4 +22,8 @@ test('a fonte declara o DB sem acesso otimizado e com a assinatura', () => {
   assert.match(fonte, /AssinaturaValor := 4000\.75;/);
   assert.match(fonte, /Reservado1 : Array\[0\.\.3\] of Word;/); // bytes 24–31
   assert.match(fonte, /OpConcluida : DInt;/);
+  assert.match(fonte, /TemperaturaTq02 : Real;   \/\/ byte 82 \(escrita do CLP\)/);
+  assert.match(fonte, /TemperaturaReservatorio : Real;   \/\/ byte 86 \(escrita do CLP\)/);
+  assert.match(fonte, /Reservado2 : Array\[0\.\.2\] of Word;   \/\/ byte 90 \(escrita do CLP\)/); // 90–95
+  assert.match(fonte, /Assinatura : Word;   \/\/ byte 96 \(assinatura\)/);
 });

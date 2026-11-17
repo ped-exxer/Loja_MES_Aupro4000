@@ -1,0 +1,17 @@
+{
+  "name": "@aupro/interface",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./estilo.css": "./src/estilo.css",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "dependencies": {
+    "@aupro/dominio": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1"
+  }
+}

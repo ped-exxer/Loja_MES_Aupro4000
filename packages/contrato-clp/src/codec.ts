@@ -55,7 +55,7 @@ function visao(bytes: Uint8Array, area: Area): DataView {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-/** Monta os 24 bytes da área de escrita do MES (bytes 0–23 do DB). */
+/** Monta a área de escrita do MES (AREA_ESCRITA). */
 export function codificarEscrita(valores: ValoresEscrita): Uint8Array {
   const bytes = new Uint8Array(AREA_ESCRITA.tamanho);
   const dados = visao(bytes, AREA_ESCRITA);
@@ -85,7 +85,7 @@ export function codificarLeitura(valores: ValoresLeitura): Uint8Array {
   return bytes;
 }
 
-/** Interpreta os 48 bytes lidos do CLP (bytes 32–79 do DB). */
+/** Interpreta a área do CLP (AREA_LEITURA). */
 export function decodificarLeitura(bytes: Uint8Array): ValoresLeitura {
   const dados = visao(bytes, AREA_LEITURA);
   const valores = {} as ValoresLeitura;
@@ -95,7 +95,7 @@ export function decodificarLeitura(bytes: Uint8Array): ValoresLeitura {
   return valores;
 }
 
-/** Bytes 80–85 do DB `MES`, com a assinatura. */
+/** Bytes da AREA_ASSINATURA do DB `MES`, com a assinatura. */
 export function codificarAssinatura(): Uint8Array {
   const bytes = new Uint8Array(AREA_ASSINATURA.tamanho);
   const dados = visao(bytes, AREA_ASSINATURA);
@@ -105,7 +105,7 @@ export function codificarAssinatura(): Uint8Array {
   return bytes;
 }
 
-/** Confere se os 6 bytes lidos a partir do byte 80 são a assinatura do DB `MES`. */
+/** Confere se os bytes lidos da AREA_ASSINATURA são a assinatura do DB `MES`. */
 export function conferirAssinatura(bytes: Uint8Array): boolean {
   if (bytes.length !== AREA_ASSINATURA.tamanho) return false;
   const dados = visao(bytes, AREA_ASSINATURA);

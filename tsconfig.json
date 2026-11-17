@@ -12,5 +12,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["packages/*/src", "apps/api/src", "apps/gateway/src"]
+  "include": ["packages/dominio/src", "packages/contrato-clp/src", "packages/servidor/src", "apps/loja/api", "apps/mes/api", "apps/gateway/src"]
 }
