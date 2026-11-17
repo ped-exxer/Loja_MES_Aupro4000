@@ -284,6 +284,18 @@ try {
   // nos indicadores a abortada conta como reprovada (perda de qualidade); o simulador pode reprovar outras
   confere(ind.produzidas === 7 && ind.aprovadas + ind.reprovadas === 7 && ind.reprovadas >= 2 && ind.abortadas === 2,
     `contagens (${ind.produzidas} produzidas, ${ind.aprovadas} aprovadas + ${ind.reprovadas} reprovadas, ${ind.abortadas} abortadas)`);
+  // os totais da tela Qualidade vêm do servidor e contam só as inspecionadas (a abortada não é inspecionada)
+  const totais = await mes('GET', '/api/mes/qualidade');
+  const inspecionadas = await mes('GET', '/api/mes/ordens?estado=aprovada,reprovada&limite=300');
+  confere(totais.aprovadas === inspecionadas.filter((o) => o.situacao.estado === 'aprovada').length
+    && totais.reprovadas === inspecionadas.filter((o) => o.situacao.estado === 'reprovada').length && totais.aprovadas === ind.aprovadas,
+    `totais da Qualidade (${totais.aprovadas} aprovadas, ${totais.reprovadas} reprovadas)`);
+  const semTolerancia = await fetch(`${MES}/api/mes/ordens`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ volume: 5, temperatura: 45, vazao: 4, pressao: 2, tolTemperatura: null, tolVolume: 0.5 }),
+  });
+  confere(semTolerancia.status === 422 && (await semTolerancia.json()).erros.some((e) => e.campo === 'tolerancia.temperatura'),
+    'OP manual com a tolerância em branco é recusada (não vira a padrão em silêncio)');
   confere(ind.oee !== null && ind.oee > 0 && ind.oee <= 1, `OEE calculado (${(ind.oee * 100).toFixed(1)} %)`);
   confere(ind.tempoParadoMs >= 900, 'parada apontada conta no OEE');
   const csv = await (await fetch(`${MES}/api/mes/relatorio.csv`)).text();

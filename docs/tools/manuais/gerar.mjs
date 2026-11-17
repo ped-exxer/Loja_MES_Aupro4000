@@ -28,6 +28,15 @@ const MANUAIS = [
     kicker: 'Ficha técnica',
     ficha: true, // manual curto: sem sumário, capítulos seguidos, miolo de no máximo 2 páginas
   },
+  {
+    md: path.join(docsDir, 'guia-aula.md'),
+    html: path.join(outDir, 'guia-aula.html'),
+    pdf: path.join(pdfDir, 'AUPRO4000 - Guia da aula.pdf'),
+    titulo: 'Guia da aula',
+    subtitulo: 'Loja e MES da bancada AUPRO4000: preparar, fazer os pedidos, acompanhar a produção e ler os resultados',
+    kicker: 'Guia rápido',
+    ficha: true,
+  },
 ];
 
 function rodar(script, args) {

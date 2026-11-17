@@ -4,6 +4,9 @@ A AUPRO4000 roda **offline**, num PC da escola na mesma rede da bancada. São **
 a **Loja** (vitrine, pedidos, faturas, catálogo) e o **MES** (fila, bancada, qualidade, indicadores, configuração da
 bancada). Uma instalação atende uma bancada.
 
+Para a aula em si (o que preparar, o roteiro, os experimentos com o simulador e os problemas comuns), veja o
+[Guia da aula](guia-aula.md), em PDF em [pdf/AUPRO4000 - Guia da aula.pdf](<pdf/AUPRO4000 - Guia da aula.pdf>).
+
 ```
  navegador ──▶ Loja :8080 ──HTTP──▶ MES :8081 ──HTTP──▶ gateway ──S7 PUT/GET (porta 102)──▶ CLP
                   │                    │
@@ -56,7 +59,7 @@ Sem login e sem papel.
 - **Fábrica: Simulador** já vem ligado. Serve para aprender, demonstrar e testar sem a bancada. A velocidade
   (padrão 20×) faz uma batelada de ~15 min durar menos de 1 min.
 - **Fábrica: Bancada (S7)**: informe o IP da CPU, rack 0 e slot 1, clique em **Procurar DBs pela assinatura** e
-  depois em **Salvar**. A caixa "Gateway" tem que mostrar "Conectado" e "Assinatura do DB MES conferida".
+  depois em **Salvar**. A caixa "Gateway" tem que mostrar "Gateway conectado" e "Assinatura do DB MES conferida".
 - **Reiniciar o MES** apaga só as ordens e os registros do MES (os pedidos da Loja ficam sem produção).
 
 **Na Loja → Configuração**:

@@ -98,6 +98,15 @@ export async function listarOrdensRecentes(
   return (await linhas<LinhaOrdem>(c, `SELECT * FROM mes_ordem ${onde} ORDER BY numero DESC LIMIT ?`, [...valores, p.limite])).map(ordemDe);
 }
 
+/** Quantas ordens há em cada um dos estados pedidos (0 para o estado sem ordem). */
+export async function contarOrdens<E extends string>(c: Conexao, estados: readonly E[]): Promise<Record<E, number>> {
+  const contagem = Object.fromEntries(estados.map((e) => [e, 0])) as Record<E, number>;
+  for (const l of await linhas<{ estado: E; total: number }>(c, 'SELECT estado, COUNT(*) AS total FROM mes_ordem WHERE estado IN (?) GROUP BY estado', [estados])) {
+    contagem[l.estado] = Number(l.total);
+  }
+  return contagem;
+}
+
 /** As ordens que chegaram desde `desde` (relatório da aula), em ordem de número. */
 export async function ordensDesde(c: Conexao, desde: number): Promise<Ordem[]> {
   return (await linhas<LinhaOrdem>(c, 'SELECT * FROM mes_ordem WHERE chegada >= ? ORDER BY numero', [new Date(desde)])).map(ordemDe);

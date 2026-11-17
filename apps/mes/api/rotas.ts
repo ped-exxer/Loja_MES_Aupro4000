@@ -20,6 +20,12 @@ export function registrarRotasMes(app: FastifyInstance, mes: Mes): void {
     return repo.listarOrdensRecentes(mes.ctx.banco, { estados, ...pagina(req.query, 300, 300) });
   });
 
+  /** Totais da tela Qualidade: todas as ordens aprovadas e reprovadas, e não só as da página carregada. */
+  app.get('/api/mes/qualidade', async () => {
+    const c = await repo.contarOrdens(mes.ctx.banco, ['aprovada', 'reprovada']);
+    return { aprovadas: c.aprovada, reprovadas: c.reprovada };
+  });
+
   app.get('/api/mes/ordens/:numero', async (req, reply) => {
     const n = inteiroPositivo((req.params as { numero: string }).numero);
     const d = n === null ? null : await mes.dossie(n);
@@ -30,7 +36,9 @@ export function registrarRotasMes(app: FastifyInstance, mes: Mes): void {
   app.post('/api/mes/ordens', async (req, reply) => {
     const c = objeto(req.body);
     const receita = { volume: numero(c.volume), temperatura: numero(c.temperatura), vazao: numero(c.vazao), pressao: numero(c.pressao) };
-    const tolerancias = { temperatura: numero(c.tolTemperatura) ?? 2, volume: numero(c.tolVolume) ?? 0.5 };
+    // tolerância ausente = a padrão (±2 °C, ±0,5 L); presente e sem valor (campo em branco na tela) é erro, não padrão
+    const tolerancia = (v: unknown, padrao: number) => (v === undefined ? padrao : (numero(v) ?? Number.NaN));
+    const tolerancias = { temperatura: tolerancia(c.tolTemperatura, 2), volume: tolerancia(c.tolVolume, 0.5) };
     const r = await mes.emitirOrdens([{ origem: ORIGEM_MANUAL, receita: receita as never, tolerancias, autor: null }]);
     if (r.ok) return reply.code(201).send({ ok: true, numero: r.numeros[0] });
     // a OP manual é sempre nova: só a receita ou as tolerâncias podem estar erradas

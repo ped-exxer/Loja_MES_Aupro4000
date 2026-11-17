@@ -149,6 +149,19 @@ test('rotas do contrato com parâmetros ruins: 400 ou 404, e a lista de andament
   assert.deepEqual(chamadas.map((c) => c.argumentos[0]), [[], [1, 3], []]);
 });
 
+test('OP manual: tolerância ausente vira a padrão; em branco ou inválida chega inválida, não vira a padrão', async (t) => {
+  const { pedir, chamadas } = await app(t);
+  const receita = { volume: 10, temperatura: 45, vazao: 4, pressao: 2 };
+  const tolerancias = () => (chamadas.at(-1)!.argumentos[0] as PedidoOrdem[])[0].tolerancias;
+  await pedir('POST', '/api/mes/ordens', receita);
+  assert.deepEqual(tolerancias(), { temperatura: 2, volume: 0.5 });
+  await pedir('POST', '/api/mes/ordens', { ...receita, tolTemperatura: 1, tolVolume: 0.2 });
+  assert.deepEqual(tolerancias(), { temperatura: 1, volume: 0.2 });
+  // a tela manda o campo em branco como null (NaN não existe em JSON)
+  await pedir('POST', '/api/mes/ordens', { ...receita, tolTemperatura: null, tolVolume: 'x' });
+  assert.ok(Number.isNaN(tolerancias().temperatura) && Number.isNaN(tolerancias().volume));
+});
+
 test('rotas da tela do MES com corpo vazio ou errado: 4xx', async (t) => {
   const { pedir, chamadas } = await app(t, () => ({ ok: false, codigo: 'receita_invalida', erros: [{ indice: 0, campo: 'volume', codigo: 'invalido' }] }));
   assert.equal((await pedir('POST', '/api/mes/ordens', 'texto solto')).status, 415); // nem é JSON

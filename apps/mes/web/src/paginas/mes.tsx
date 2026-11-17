@@ -531,13 +531,14 @@ export function Qualidade() {
   if (lista) antes.current = lista;
   const todas = lista ?? antes.current; // ao pedir mais, a lista de antes fica na tela até a nova chegar
   const dados = todas ? todas.slice(0, limite) : null;
-  const aprovadas = (dados ?? []).filter((o) => o.situacao.estado === 'aprovada').length;
+  // os totais vêm do servidor: a lista é só a página carregada
+  const totais = useDados<{ aprovadas: number; reprovadas: number }>('/api/mes/qualidade', ['ordem', 'reiniciado']).dados;
   return (
     <Pagina titulo={t.qualidade.titulo} subtitulo={t.qualidade.texto}>
-      {dados && dados.length > 0 && (
+      {totais && totais.aprovadas + totais.reprovadas > 0 && (
         <div className="numeros">
-          <Numero rotulo={t.indicadores.aprovadas} valor={String(aprovadas)} tom="ok" icone="certo" />
-          <Numero rotulo={t.indicadores.reprovadas} valor={String(dados.length - aprovadas)} tom={dados.length - aprovadas > 0 ? 'ruim' : undefined} icone="fechar" />
+          <Numero rotulo={t.indicadores.aprovadas} valor={String(totais.aprovadas)} tom="ok" icone="certo" />
+          <Numero rotulo={t.indicadores.reprovadas} valor={String(totais.reprovadas)} tom={totais.reprovadas > 0 ? 'ruim' : undefined} icone="fechar" />
         </div>
       )}
       <Cartao titulo={t.qualidade.recentes}>

@@ -25,9 +25,11 @@ identidade visual Exxer, sem dependências npm e sem internet). Regras do gerado
     leva `ficha: true`.
   - **Manual completo**: capítulos em página nova, sumário, e os capítulos Fontes e Pendências no fim.
   Na dúvida sobre qual o usuário quer, pergunte; para "o que temos dos sensores/atuadores", é ficha.
-- PDF: `docs/pdf/<nome de entrega>.pdf`, no git (é o que se entrega). Hoje só o
-  `docs/pdf/AUPRO4000 - Manual dos instrumentos.pdf` (ficha, 4 páginas: capa, 2 de miolo, contracapa; fonte
-  `docs/instrumentos.md`; notas em `docs/instrumentos-notas.md`). A lista de manuais com PDF, com
+- PDF: `docs/pdf/<nome de entrega>.pdf`, no git (é o que se entrega). Hoje há dois, ambos fichas de 4 páginas
+  (capa, 2 de miolo, contracapa): `docs/pdf/AUPRO4000 - Manual dos instrumentos.pdf` (fonte
+  `docs/instrumentos.md`; notas em `docs/instrumentos-notas.md`) e `docs/pdf/AUPRO4000 - Guia da aula.pdf` (fonte
+  `docs/guia-aula.md`: os dois sistemas, o preparo, o roteiro da aula, os experimentos com o simulador e os
+  problemas comuns). A lista de manuais com PDF, com
   título e subtítulo da capa, é o array `MANUAIS` de `docs/tools/manuais/gerar.mjs`. O HTML intermediário fica em
   `docs/tools/manuais/out/`, fora do git.
 - Gerador: `docs/tools/manuais/` — `build.mjs` (md → HTML com a identidade visual, fontes, logos e paged.js

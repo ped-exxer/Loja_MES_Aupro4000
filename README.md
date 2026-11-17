@@ -7,6 +7,7 @@ um pedido por vez, e a bancada produz. Qualidade, rastreabilidade, certificado e
 
 - **Por que e o quê:** [ROTEIRO.md](ROTEIRO.md)
 - **Instalar e configurar:** [docs/instalacao.md](docs/instalacao.md)
+- **Dar a aula:** [Guia da aula (PDF, 2 páginas)](<docs/pdf/AUPRO4000 - Guia da aula.pdf>); fonte em [docs/guia-aula.md](docs/guia-aula.md)
 - **Programa do CLP:** [docs/programa-clp.md](docs/programa-clp.md) e o DB para o TIA Portal em [docs/clp/MES.db](docs/clp/MES.db)
 - **Para agentes de IA:** [AGENTS.md](AGENTS.md)
 

@@ -24,6 +24,7 @@ capa). Hoje:
 | PDF | Fonte |
 |---|---|
 | `docs/pdf/AUPRO4000 - Manual dos instrumentos.pdf` | `docs/instrumentos.md` (ficha: capa, 2 páginas de miolo, contracapa) |
+| `docs/pdf/AUPRO4000 - Guia da aula.pdf` | `docs/guia-aula.md` (ficha: capa, 2 páginas de miolo, contracapa) |
 
 `docs/instrumentos-notas.md` (endereços, fontes, pendências, divergências) é interno e **não vira PDF**.
 
@@ -94,6 +95,39 @@ contêineres da Loja, do MES e do gateway não carregam nada dele.
   Exxer (lá elas também estão no git). O gerador embute o que estiver na pasta: "liber" no nome = títulos,
   "altone" = texto, peso pelo sufixo (`-Regular`, `-SemiBold`, `-Bold`...); itálicos e variáveis (`VF`) são
   ignorados. Sem arquivos lá, o manual sai em Segoe UI / Arial.
+
+### Licença das fontes
+
+> **Atenção: confira antes de tornar este repositório público.** As duas fontes são **comerciais** ("All rights
+> reserved" nos metadados), não são livres (nada de OFL ou Apache), e não há neste repositório nem no da Plataforma
+> Exxer nenhum comprovante de compra ou arquivo de licença. Os arquivos `.ttf` estão no git: publicar o repositório
+> é redistribuir as fontes.
+
+O que foi achado (em 17/11/2026), nos metadados dos próprios `.ttf` (tabela `name`) e no repositório
+`plataforma_exxer`:
+
+| Fonte | Arquivos | Autor e direitos (metadados) | Licença (metadados) | Embutir (`fsType`) |
+|---|---|---|---|---|
+| Altone | `Altone-Regular.ttf`, `-SemiBold`, `-Bold` (versão 1.000, 2021) | "Copyright (c) 2021 by Eko Bimantara. All rights reserved."; marca de Eko Bimantara; ekobimantara.com | **Nenhum texto nem endereço de licença no arquivo** | 4: só visualizar e imprimir |
+| Liber Grotesque | `LiberGrotesqueFamily-Regular.ttf`, `-SemiBold`, `-Bold` (versão 1.000, 2016) | "Copyright (c) 2016 by Valerio Dell'Edera. All rights reserved."; hederae.it; vendida em creativemarket.com/valeriodelledera | Texto da licença do **Creative Market** embutido (`https://creativemarket.com/licenses/terms`) | 0: instalável |
+
+- **Origem das cópias:** `plataforma_exxer/docs/softwares_exxer/docs/tools/manuais/fonts/` (lá estão no git, com
+  todos os pesos; a plataforma também as usa na tela, em `frontend/src/assets/fonts/`). São as fontes da identidade
+  visual da Exxer (MIV 2023).
+- **Na Plataforma Exxer não há licença das fontes:** nenhum arquivo de licença ao lado dos `.ttf` e nenhuma menção
+  à compra ou à licença nos documentos. O `LICENSE` da raiz de lá (MIT, Exxer P&D) é do código, não das fontes.
+- **Liber Grotesque:** o texto embutido é o da licença do Creative Market. Na licença padrão, ele permite usar a
+  fonte em produtos finais e distribuí-los, mas **proíbe redistribuir o item sozinho** ("not even for free"), o
+  que inclui deixar o `.ttf` num repositório público. Qual licença a Exxer comprou (padrão ou estendida) não está
+  registrado.
+- **Altone:** o arquivo não traz a licença. O autor a vende; os termos dependem de onde e como foi comprada.
+  O `fsType` 4 permite embutir a fonte em documento para ver e imprimir, que é o que o PDF faz.
+- **Os PDFs** em `docs/pdf/` levam as fontes embutidas (uso em produto final). **Os `.ttf`** nesta pasta é que são
+  o ponto a conferir.
+
+Antes de publicar: confirmar com quem cuida da identidade visual da Exxer quais licenças foram compradas e o que
+elas permitem; se não permitirem redistribuir, tirar `fonts/` do git (inclusive do histórico) e deixar a pasta
+para ser preenchida por quem tem a licença. Sem os arquivos, o gerador continua funcionando, em Segoe UI / Arial.
 
 ## Manual novo
 
