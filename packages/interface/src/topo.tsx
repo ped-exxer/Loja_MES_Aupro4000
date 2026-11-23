@@ -45,21 +45,40 @@ function Logo() {
   );
 }
 
-export function Topo({ sistema, menu, marcada, extra }: {
+export function Topo({ sistema, menu, marcada, extra, menuCompacto = false }: {
   sistema: NomeSistema;
   menu: { rota: string; rotulo: string }[];
   marcada: string;
-  /** Indicador próprio do sistema (no MES, o estado da comunicação com o CLP). */
+  /** Indicador próprio do sistema (no MES, o estado da comunicação com o CLP; na Loja, o carrinho). */
   extra?: ReactNode;
+  /** No celular, o topo fica numa linha só e o menu abre por um botão (sem isto, o menu vai para a linha de baixo). */
+  menuCompacto?: boolean;
 }) {
   const { t, idioma, trocar } = useIdioma();
   const { tema, trocar: trocarTema } = useTema();
   const outro = useOutroSistema();
   const noAr = useConexao();
+  const [menuAberto, setMenuAberto] = useState(false);
   useEffect(() => {
     document.title = `${t.titulo} · ${t.sistema[sistema]}`;
     document.documentElement.dataset.sistema = sistema;
   }, [t, sistema]);
+  // o menu compacto fecha ao trocar de tela e com Esc (o foco volta ao botão)
+  useEffect(() => {
+    if (!menuAberto) return;
+    const fechar = () => setMenuAberto(false);
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      fechar();
+      document.querySelector<HTMLElement>('.topo-menu-botao')?.focus();
+    };
+    addEventListener('hashchange', fechar);
+    addEventListener('keydown', aoTeclar);
+    return () => {
+      removeEventListener('hashchange', fechar);
+      removeEventListener('keydown', aoTeclar);
+    };
+  }, [menuAberto]);
   const proximoTema = TEMAS[(TEMAS.indexOf(tema) + 1) % TEMAS.length];
 
   return (
@@ -67,16 +86,17 @@ export function Topo({ sistema, menu, marcada, extra }: {
       <a className="pular" href="#conteudo" onClick={(e) => { e.preventDefault(); document.getElementById('conteudo')?.focus(); }}>
         {t.topo.pular}
       </a>
-      <header className="topo">
+      <header className={`topo${menuCompacto ? ' topo-compacto' : ''}${menuAberto ? ' menu-aberto' : ''}`}>
         <div className="topo-dentro">
           <a className="marca" href="#/" aria-label={`${t.titulo} ${t.sistema[sistema]}`}>
             <Logo />
             <span className="marca-nome">{t.titulo}</span>
             <span className="marca-sistema">{t.sistema[sistema]}</span>
           </a>
-          <nav className="menu" aria-label={t.topo.menu}>
+          <nav className="menu" id="topo-menu" aria-label={t.topo.menu}>
             {menu.map((m) => (
-              <a key={m.rota} href={`#/${m.rota}`} className={marcada === m.rota ? 'ativo' : ''} aria-current={marcada === m.rota ? 'page' : undefined}>
+              <a key={m.rota} href={`#/${m.rota}`} aria-current={marcada === m.rota ? 'page' : undefined}
+                onClick={() => setMenuAberto(false)}>
                 {m.rotulo}
               </a>
             ))}
@@ -103,6 +123,19 @@ export function Topo({ sistema, menu, marcada, extra }: {
             >
               <Icone nome={ICONE_TEMA[tema]} />
             </button>
+            {menuCompacto && (
+              <button
+                type="button"
+                className="topo-botao so-icone topo-menu-botao"
+                aria-expanded={menuAberto}
+                aria-controls="topo-menu"
+                aria-label={t.topo.menu}
+                title={t.topo.menu}
+                onClick={() => setMenuAberto((a) => !a)}
+              >
+                <Icone nome={menuAberto ? 'fechar' : 'lista'} />
+              </button>
+            )}
           </div>
         </div>
       </header>

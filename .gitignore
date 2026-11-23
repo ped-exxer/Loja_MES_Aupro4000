@@ -4,3 +4,6 @@ dist/
 
 # Gerador dos manuais em PDF: o HTML intermediário é refeito a cada geração (o PDF em docs/pdf/ vai no git)
 docs/tools/manuais/out/
+
+# Configuração local da máquina (portas etc.): o modelo versionado é o .env.example
+.env

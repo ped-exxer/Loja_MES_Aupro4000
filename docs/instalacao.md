@@ -35,9 +35,11 @@ Nos outros computadores da sala: `http://<ip-do-pc>:8080` e `http://<ip-do-pc>:8
 sistema ("AUPRO4000 · Loja" ou "AUPRO4000 · MES") e um botão para abrir o outro.
 
 - Outras portas: variáveis `PORTA_LOJA` e `PORTA_MES` (PowerShell: `$env:PORTA_LOJA='8090'; $env:PORTA_MES='8091';
-  docker compose up -d --build`). O link de um sistema para o outro usa o mesmo endereço da página com a porta do
+  docker compose up -d --build`). Para não repetir a cada subida, copie `.env.example` para `.env` na raiz e troque
+  as portas lá: o `docker compose` lê o `.env` sozinho (ele fica fora do git, é desta máquina). O link de um sistema para o outro usa o mesmo endereço da página com a porta do
   outro; se precisar de outro endereço (um nome na rede, por exemplo), defina `MES_URL_PUBLICA` e `LOJA_URL_PUBLICA`.
-- Parar: `docker compose down`. Os dados ficam no volume `dados-banco`.
+- Parar: `docker compose down`. Os dados ficam no volume `loja-mes-aubot4000_dados-banco`. O nome do projeto Compose
+  (`loja-mes-aubot4000`) é fixo no `docker-compose.yml` e não depende do nome da pasta.
 - Conferir: `docker compose ps` mostra os quatro serviços (`loja`, `mes`, `gateway`, `banco`) como `healthy`.
   `http://localhost:8080/api/saude` mostra a Loja, a base dela e se o MES responde; `http://localhost:8081/api/saude`
   mostra o MES, a base dele e se o gateway responde.
@@ -96,7 +98,8 @@ Veja [programa-clp.md](programa-clp.md). Em resumo:
 
 ## 6. Backup
 
-Os dados ficam no volume Docker `dados-banco` (um MySQL com as duas bases). Copie as duas:
+Os dados ficam no volume Docker `loja-mes-aubot4000_dados-banco` (`dados-banco` no `docker-compose.yml`; um MySQL
+com as duas bases). Copie as duas:
 
 ```
 docker compose exec -T banco mysqldump -uloja -ploja loja > backup-loja.sql

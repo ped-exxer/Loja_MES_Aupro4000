@@ -36,6 +36,7 @@ function Telas() {
         sistema="mes"
         extra={<EstadoClp />}
         marcada={marcada}
+        menuCompacto
         menu={[
           { rota: '', rotulo: t.menu.fila },
           { rota: 'bancada', rotulo: t.menu.bancada },

@@ -1,7 +1,7 @@
 # Instruções para agentes de IA neste projeto
 
-Projeto: **Loja (com ERP) e MES da bancada AUPRO4000** (Exxer). Leia o [ROTEIRO.md](ROTEIRO.md) antes de qualquer
-coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decisões em aberto.
+Projeto: **Loja-MES Aubot4000**, a Loja (com ERP) e o MES da bancada **AUPRO4000** (Exxer). Leia o
+[ROTEIRO.md](ROTEIRO.md) antes de qualquer coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decisões em aberto.
 
 ## Regras
 
@@ -63,6 +63,8 @@ coisa: objetivo, módulos, implantação, comunicação com o CLP, fases e decis
 - `npm test`: testes de `packages/*` e `apps/*` (sem bancada, sem banco).
 - `npm run tipos`: checagem de tipos (`tsc --noEmit`).
 - `npm run build`: compila as duas telas (`apps/loja/web/dist`, `apps/mes/web/dist`).
+- Nome do projeto Compose: `loja-mes-aubot4000` (fixo no `docker-compose.yml`, não depende da pasta): contêineres
+  `loja-mes-aubot4000-<serviço>-1`, volume `loja-mes-aubot4000_dados-banco`.
 - `docker compose up -d --build`: sobe `banco`, `gateway`, `mes` e `loja` (Loja em http://localhost:8080, MES em
   http://localhost:8081; outras portas com `PORTA_LOJA` e `PORTA_MES`). `docker compose ps` mostra os quatro
   `healthy`; `GET /api/saude` de cada sistema mostra a base dele e o vizinho (MES na Loja, gateway no MES).

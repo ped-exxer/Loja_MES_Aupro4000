@@ -42,6 +42,9 @@
   --primaria-fundo: #e0ebfd;
   --topo-1: var(--mes-escura);
   --topo-2: #1e40af;
+  /* destaque sobre o topo escuro (item ativo do menu): a `--primaria-forte` do tema escuro, que lê bem no topo nos
+     dois temas */
+  --topo-destaque: #a5c8ff;
 
   --raio: 12px;
   --raio-menor: 8px;
@@ -54,6 +57,7 @@
   --primaria-fundo: #d8f3ef;
   --topo-1: var(--loja-escura);
   --topo-2: #0f766e;
+  --topo-destaque: #7fe3d6;
 }
 
 /* escuro: pelo sistema operacional (se a tela não fixou o claro) ou fixado pelo botão do topo. As duas regras têm
@@ -212,21 +216,33 @@ main:focus { outline: none; }
   font-weight: 800; font-size: .95rem; letter-spacing: .08em; text-transform: uppercase;
   background: #fff; color: var(--topo-1); padding: .12rem .6rem; border-radius: 999px;
 }
-.menu { display: flex; gap: .15rem; flex: 1; min-width: 0; }
+/* menu plano: links de texto na altura toda do topo; o ativo em negrito, com um traço fino na cor de destaque
+   encostado na borda de baixo do topo (o mesmo traço, mais apagado, no hover) */
+.menu { display: flex; gap: .25rem; flex: 1; min-width: 0; align-self: stretch; margin-block: -.55rem; }
 .menu a {
-  padding: .4rem .8rem; border-radius: 999px; text-decoration: none; color: rgb(255 255 255 / 82%);
-  font-weight: 500; white-space: nowrap;
+  position: relative; display: flex; align-items: center; padding: .55rem .7rem; text-decoration: none;
+  color: rgb(255 255 255 / 78%); font-weight: 500; white-space: nowrap; transition: color .15s;
 }
-.menu a:hover { background: rgb(255 255 255 / 12%); color: #fff; }
-.menu a.ativo { background: rgb(255 255 255 / 20%); color: #fff; font-weight: 700; box-shadow: inset 0 -2px 0 #fff; }
+.menu a::after {
+  content: ''; position: absolute; left: .7rem; right: .7rem; bottom: 0; height: 3px; border-radius: 3px 3px 0 0;
+  background: transparent; transition: background-color .15s;
+}
+.menu a:hover { color: #fff; }
+.menu a:hover::after { background: rgb(255 255 255 / 30%); }
+.menu a[aria-current='page'] { color: #fff; font-weight: 700; }
+.menu a[aria-current='page']::after { background: var(--topo-destaque); }
+.menu a:focus-visible { outline-offset: -4px; }
 .topo-extras { display: flex; align-items: center; gap: .4rem; margin-left: auto; }
+/* botões do topo: planos, com contorno discreto; os de só ícone nem contorno têm */
 .topo-botao {
   display: inline-flex; align-items: center; gap: .4rem; height: 2.2rem; padding: 0 .7rem; font: inherit; font-size: .9rem;
-  font-weight: 600; color: #fff; background: rgb(255 255 255 / 12%); border: 1px solid rgb(255 255 255 / 22%);
+  font-weight: 600; color: #fff; background: transparent; border: 1px solid rgb(255 255 255 / 28%);
   border-radius: var(--raio-menor); text-decoration: none; cursor: pointer; white-space: nowrap; width: auto;
+  transition: background-color .15s, border-color .15s;
 }
-.topo-botao:hover { background: rgb(255 255 255 / 22%); }
-.topo-botao.so-icone { width: 2.2rem; padding: 0; justify-content: center; }
+.topo-botao:hover { background: rgb(255 255 255 / 10%); border-color: rgb(255 255 255 / 45%); }
+.topo-botao.so-icone { width: 2.2rem; padding: 0; justify-content: center; border-color: transparent; }
+.topo-botao.so-icone:hover { border-color: transparent; }
 select.topo-botao { padding: 0 .35rem 0 .55rem; }
 select.topo-botao option { color: #121923; background: #fff; }
 .topo-estado {
@@ -249,11 +265,30 @@ select.topo-botao option { color: #121923; background: #fff; }
   .marca { margin-right: 0; }
   .marca-nome { font-size: 1rem; }
   /* o menu vai para a linha de baixo e rola de lado dentro dele (a página não) */
-  .menu { order: 3; flex: 0 0 100%; overflow-x: auto; scrollbar-width: none; margin: 0 -.25rem; padding: 0 .25rem 2px; }
+  .menu { order: 3; flex: 0 0 100%; overflow-x: auto; scrollbar-width: none; margin: 0 -.25rem -.5rem; gap: 0; }
   .menu::-webkit-scrollbar { display: none; }
-  .menu a { padding: .35rem .6rem; font-size: .93rem; }
+  .menu a { padding: .4rem .6rem .55rem; font-size: .93rem; }
+  .menu a::after { left: .6rem; right: .6rem; }
   .outro-sistema span, .topo-estado span { display: none; }
   .outro-sistema, .topo-estado { width: 2.2rem; padding: 0; justify-content: center; }
+}
+/* menu compacto (opcional, `menuCompacto` no Topo; a Loja e o MES usam): no celular, o topo fica numa linha só e o
+   menu abre por um botão, como uma lista logo abaixo do topo (sem o texto da marca; o indicador do CLP fica) */
+.topo-menu-botao { display: none; }
+@media (max-width: 760px) {
+  .topo-compacto .topo-dentro { flex-wrap: nowrap; position: relative; }
+  .topo-compacto .marca-nome { display: none; }
+  .topo-compacto .menu { display: none; }
+  .topo-compacto.menu-aberto .menu {
+    display: flex; flex-direction: column; gap: 0; position: absolute; top: 100%; left: 0; right: 0; margin: 0;
+    padding: .25rem 0 .5rem; overflow: visible; background: var(--topo-1); border-top: 1px solid rgb(255 255 255 / 12%);
+    box-shadow: 0 10px 20px rgb(16 24 40 / 25%);
+  }
+  /* no painel, uma lista simples: o ativo marcado por uma barra à esquerda */
+  .topo-compacto .menu a { padding: .75rem 1.25rem; font-size: 1rem; }
+  .topo-compacto .menu a::after { left: 0; right: auto; top: .5rem; bottom: .5rem; width: 3px; height: auto; border-radius: 0 3px 3px 0; }
+  .topo-compacto .menu a:hover { background: rgb(255 255 255 / 6%); }
+  .topo-compacto .topo-menu-botao { display: inline-flex; }
 }
 @media (max-width: 420px) {
   .marca-nome { font-size: .92rem; letter-spacing: .02em; }
@@ -494,72 +529,188 @@ table.simples td:last-child { padding-right: 0; }
 .lista-eventos time { color: var(--suave); font-variant-numeric: tabular-nums; }
 .lista-eventos .evento-apoio { grid-column: 2; color: var(--suave); font-size: .84rem; overflow-wrap: anywhere; }
 
-/* ---------- Loja: vitrine ---------- */
+/* ---------- Loja: vitrine (o pedido em passos) ---------- */
 
 .vitrine-capa {
-  border-radius: var(--raio); padding: 1.6rem 1.5rem; margin-bottom: 1.25rem; color: #fff;
+  border-radius: var(--raio); padding: 1.1rem 1.4rem; margin-bottom: 1rem; color: #fff;
   background: radial-gradient(120% 160% at 100% 0%, #14b8a6 0%, transparent 55%), linear-gradient(120deg, #0b534d, #0f766e);
   box-shadow: var(--sombra);
 }
-.vitrine-capa h1 { font-size: 1.8rem; }
-.vitrine-capa p { margin: .5rem 0 0; max-width: 46rem; color: rgb(255 255 255 / 88%); }
-.vitrine { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem); align-items: start; }
-.produtos { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); }
-.produto {
-  display: flex; flex-direction: column; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
-  box-shadow: var(--sombra); overflow: hidden; transition: box-shadow .15s, transform .15s, border-color .15s;
+.vitrine-capa h1 { font-size: 1.5rem; }
+.vitrine-capa p { margin: .35rem 0 0; max-width: 46rem; color: rgb(255 255 255 / 88%); }
+
+/* o carrinho no topo (no espaço `extra` do Topo, que só a Loja usa assim) */
+.loja-topo-carrinho { gap: .35rem; }
+.loja-topo-carrinho[aria-current='page'] { border-color: var(--topo-destaque); }
+.loja-topo-contador {
+  display: inline-grid; place-items: center; min-width: 1.35rem; height: 1.35rem; padding: 0 .3rem; border-radius: 999px;
+  background: #fff; color: var(--topo-1); font-size: .78rem; font-weight: 800; font-variant-numeric: tabular-nums;
 }
-.produto:hover { box-shadow: var(--sombra-alta); transform: translateY(-2px); border-color: var(--borda-forte); }
-.produto-figura { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; }
-.produto-figura svg { width: 100%; height: 100%; display: block; }
+
+/* os passos: barras numeradas; os já alcançados são botões */
+.loja-progresso { margin-bottom: 1rem; }
+.loja-progresso-texto { display: none; }
+.loja-progresso ol { display: flex; gap: .5rem; list-style: none; margin: 0; padding: 0; }
+.loja-progresso li { flex: 1; min-width: 0; }
+.loja-progresso li > button, .loja-progresso-item {
+  display: flex; align-items: center; gap: .5rem; width: 100%; padding: .55rem .25rem .2rem; font: inherit; font-weight: 600;
+  color: var(--suave); background: none; border: none; border-top: 4px solid var(--borda-forte); border-radius: 0; text-align: left;
+}
+.loja-progresso li > button { cursor: pointer; }
+.loja-progresso li > button:hover .loja-progresso-nome { text-decoration: underline; }
+.loja-progresso li.feito > *, .loja-progresso li.atual > * { border-top-color: var(--primaria); color: var(--texto); }
+.loja-progresso li.atual .loja-progresso-nome { font-weight: 800; }
+.loja-progresso-marca {
+  display: inline-grid; place-items: center; flex: none; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  border: 2px solid var(--borda-forte); font-size: .8rem; font-weight: 800;
+}
+.loja-progresso li.feito .loja-progresso-marca { background: var(--primaria); border-color: var(--primaria); color: var(--primaria-texto); }
+.loja-progresso li.atual .loja-progresso-marca { border-color: var(--primaria); color: var(--primaria); }
+.loja-progresso-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* à esquerda o passo, à direita a "foto" da escolha (ou, na revisão, o fechamento do pedido) */
+.loja-pedido { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1fr) minmax(18rem, 23rem); align-items: start; }
+.loja-pedido > .cartao { margin: 0; }
+.loja-passo h2 { font-size: 1.3rem; margin-bottom: .9rem; }
+.loja-passo h2:focus { outline: none; }
+
+.loja-prontas { margin-bottom: 1.25rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--borda); }
+.loja-prontas h3 { margin-top: 0; }
+.loja-prontas p { margin: 0; }
+.loja-prontas ul { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+.loja-pronta {
+  display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); align-items: center; gap: .7rem; width: 100%;
+  padding: .45rem .75rem .45rem .45rem; font: inherit; text-align: left; color: var(--texto); background: var(--superficie);
+  border: 1px solid var(--borda-forte); border-radius: var(--raio-menor); cursor: pointer;
+}
+.loja-pronta:hover { border-color: var(--primaria); background: var(--superficie-2); }
+.loja-pronta.escolhida { border-color: var(--primaria); background: var(--primaria-fundo); }
+.loja-pronta-figura, .loja-item-figura { display: block; overflow: hidden; border-radius: 6px; }
+.loja-pronta-figura { width: 4.2rem; height: 3.2rem; }
+.loja-pronta-figura svg, .loja-item-figura svg, .loja-resumo-figura svg { display: block; width: 100%; height: 100%; }
+.loja-pronta-texto { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.loja-pronta-texto .suave { font-size: .8rem; }
+.loja-pronta-preco { font-weight: 800; font-variant-numeric: tabular-nums; margin-top: .1rem; }
+
+/* opções de volume e de temperatura: botões de rádio de verdade (setas do teclado), com cara de cartão */
+.loja-opcoes { border: none; margin: 0; padding: 0; min-width: 0; }
+.loja-opcoes legend { padding: 0; }
+.loja-opcoes-lista { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.loja-opcao {
+  position: relative; display: flex; flex-direction: column; gap: .1rem; padding: .75rem 2.2rem .75rem 1rem; cursor: pointer;
+  background: var(--superficie); border: 2px solid var(--borda); border-radius: var(--raio-menor);
+}
+.loja-opcao input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
+.loja-opcao::after {
+  content: ''; position: absolute; top: .7rem; right: .7rem; width: 1rem; height: 1rem; border-radius: 50%;
+  border: 2px solid var(--borda-forte); background: var(--superficie);
+}
+.loja-opcao:hover { border-color: var(--borda-forte); }
+.loja-opcao:has(input:checked) { border-color: var(--primaria); background: var(--primaria-fundo); }
+.loja-opcao:has(input:checked)::after { border-color: var(--primaria); background: var(--primaria); box-shadow: inset 0 0 0 2px var(--superficie); }
+.loja-opcao:has(input:focus-visible) { outline: 3px solid var(--primaria); outline-offset: 2px; }
+.loja-opcao-valor { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.loja-opcao-apoio { font-size: .84rem; font-weight: 600; color: var(--suave); }
+.loja-livre { margin-top: .9rem; max-width: 17rem; }
+
+.loja-quantidade .aviso { margin: 0; }
+.loja-quantidade p { margin: 0; }
+.loja-contador-grande { margin-bottom: 1rem; }
+.loja-contador-grande button { width: 3rem; height: 3rem; }
+.loja-contador-grande output { min-width: 3.5rem; font-size: 1.6rem; }
+
+.loja-navegar { display: flex; align-items: center; gap: .5rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--borda); }
+
+.loja-resumo { position: sticky; top: 4.6rem; padding: 0; overflow: hidden; }
+.loja-resumo-figura { position: relative; aspect-ratio: 16 / 10; }
+.loja-resumo-corpo { display: flex; flex-direction: column; align-items: flex-start; gap: .45rem; padding: 1rem 1.25rem; }
+.loja-resumo-corpo h2 { font-size: 1.25rem; }
+.loja-resumo-corpo p { margin: 0; }
+.loja-resumo-carrinho {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; padding: .7rem 1.25rem;
+  border-top: 1px solid var(--borda); background: var(--superficie-2); font-size: .9rem;
+}
+
 .produto-etiqueta { position: absolute; top: .6rem; left: .6rem; background: var(--superficie); color: var(--texto); font-size: .75rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: .15rem .55rem; border-radius: 999px; box-shadow: var(--sombra); }
-.produto-corpo { display: flex; flex-direction: column; gap: .6rem; padding: 1rem; flex: 1; }
-.produto-corpo h2 { font-size: 1.15rem; }
-.produto-corpo p { margin: 0; }
 .ficha { display: flex; gap: .4rem; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
 .ficha li { display: inline-flex; align-items: center; gap: .3rem; background: var(--superficie-2); border: 1px solid var(--borda); border-radius: 999px; padding: .12rem .6rem; font-size: .84rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.produto-medidas { display: grid; gap: .6rem; grid-template-columns: 1fr 1fr; }
-.produto-rodape { display: flex; align-items: flex-end; justify-content: space-between; gap: .5rem; margin-top: auto; padding-top: .25rem; }
 .preco { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .prazo { display: inline-flex; align-items: center; gap: .3rem; font-size: .84rem; color: var(--suave); }
 
-.carrinho { position: sticky; top: 4.6rem; margin: 0; }
-.carrinho-topo { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .75rem; }
-.carrinho-topo h2 { display: flex; align-items: center; gap: .5rem; }
-.contador { display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; background: var(--primaria); color: var(--primaria-texto); font-size: .8rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.carrinho-itens { list-style: none; margin: 0 0 .75rem; padding: 0; }
-.carrinho-itens li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .75rem; padding: .7rem 0; border-bottom: 1px solid var(--borda); }
-.carrinho-itens .nome { font-weight: 700; }
-.carrinho-itens .valor { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+/* revisar: os itens do carrinho e o fechamento */
+.loja-itens { list-style: none; margin: 0 0 1rem; padding: 0; }
+.loja-itens li {
+  display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto; grid-template-areas: 'fig texto valor' 'fig acoes acoes';
+  gap: .4rem .8rem; align-items: center; padding: .8rem 0; border-bottom: 1px solid var(--borda);
+}
+.loja-item-figura { grid-area: fig; align-self: start; width: 4.5rem; height: 3.2rem; }
+.loja-item-texto { grid-area: texto; min-width: 0; }
+.loja-item-texto .nome { font-weight: 700; }
+.loja-item-acoes { grid-area: acoes; display: flex; align-items: center; gap: .5rem; }
+.loja-itens .valor { grid-area: valor; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 .quantidade { display: inline-flex; align-items: center; justify-self: start; border: 1px solid var(--borda-forte); border-radius: var(--raio-menor); }
 .quantidade button { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; background: none; border: none; color: var(--texto); cursor: pointer; border-radius: var(--raio-menor); }
 .quantidade button:hover:not(:disabled) { background: var(--neutro-fundo); }
 .quantidade button:disabled { opacity: .4; cursor: not-allowed; }
 .quantidade output { min-width: 1.8rem; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
-.carrinho-total { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; margin-bottom: 1rem; }
+.loja-fechar { position: sticky; top: 4.6rem; }
+.carrinho-total { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; margin-bottom: .5rem; }
 .carrinho-total strong { font-size: 1.4rem; font-variant-numeric: tabular-nums; }
-.carrinho .campo { margin-bottom: .9rem; }
-.carrinho-barra, .carrinho-fundo, .carrinho-fechar { display: none; }
+.loja-fechar .prazo { margin-bottom: .25rem; }
+.loja-fechar .campo { margin-bottom: .9rem; }
+.loja-fechar .aviso { margin: 1rem 0 0; }
+
+/* enquanto o catálogo chega: o desenho da tela, sem conteúdo */
+.loja-esqueleto {
+  display: block; border-radius: var(--raio-menor); background: linear-gradient(90deg, var(--neutro-fundo) 30%, var(--superficie-2) 50%, var(--neutro-fundo) 70%);
+  background-size: 300% 100%; animation: loja-brilho 1.4s ease-in-out infinite;
+}
+@keyframes loja-brilho { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.loja-esqueleto-capa { height: 5.4rem; margin-bottom: 1rem; border-radius: var(--raio); }
+.loja-esqueleto-linha { height: 1.2rem; margin-bottom: .9rem; }
+.loja-esqueleto-opcao { height: 4.2rem; }
+.loja-esqueleto-figura { aspect-ratio: 16 / 10; margin-bottom: 1rem; }
 
 @media (max-width: 900px) {
-  .vitrine { grid-template-columns: minmax(0, 1fr); }
-  /* celular: o carrinho fica sempre à mão numa barra embaixo e abre como gaveta */
-  .carrinho-barra {
-    display: flex; align-items: center; gap: .6rem; position: fixed; left: .75rem; right: .75rem; bottom: .75rem; z-index: 30;
-    min-height: 3.2rem; padding: .5rem 1rem; border: none; border-radius: 999px; background: var(--primaria); color: var(--primaria-texto);
-    font: inherit; font-weight: 700; box-shadow: var(--sombra-alta); cursor: pointer;
+  .loja-pedido { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  /* celular: a "foto" da escolha vem antes do passo, compacta (ilustração ao lado do texto) */
+  .loja-resumo { position: static; order: -1; display: grid; grid-template-columns: 8rem minmax(0, 1fr); }
+  .loja-resumo-figura { aspect-ratio: auto; min-height: 6.5rem; }
+  .loja-resumo-corpo { padding: .65rem .85rem; gap: .3rem; }
+  .loja-resumo-corpo h2 { font-size: 1.05rem; }
+  .loja-resumo .preco { font-size: 1.2rem; }
+  .loja-resumo .produto-etiqueta { top: .35rem; left: .35rem; font-size: .62rem; padding: .1rem .4rem; }
+  .loja-resumo-carrinho { grid-column: 1 / -1; padding: .45rem .85rem; }
+  .loja-fechar { position: static; }
+  .loja-esqueleto-resumo { order: -1; }
+  .loja-esqueleto-resumo .loja-esqueleto-figura { aspect-ratio: auto; height: 6.5rem; }
+}
+
+@media (max-width: 760px) {
+  .vitrine-capa { padding: .7rem .9rem; margin-bottom: .75rem; }
+  .vitrine-capa h1 { font-size: 1.1rem; }
+  .vitrine-capa p { font-size: .84rem; margin-top: .15rem; }
+  .loja-esqueleto-capa { height: 3.8rem; }
+  /* um passo por vez com "Passo 2 de 4 · Temperatura"; as barras ficam só com os números */
+  .loja-progresso { margin-bottom: .75rem; }
+  .loja-progresso-texto { display: block; margin: 0 0 .35rem; font-size: .86rem; color: var(--suave); }
+  .loja-progresso-texto strong { color: var(--texto); }
+  .loja-progresso ol { gap: .3rem; }
+  .loja-progresso li > button, .loja-progresso-item { justify-content: center; padding-top: .4rem; }
+  .loja-progresso-nome { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .loja-passo h2 { font-size: 1.15rem; margin-bottom: .7rem; }
+  .loja-prontas { margin-bottom: 1rem; padding-bottom: 1rem; }
+  /* as receitas prontas rolam de lado (cartões pequenos), para os passos não ficarem longe */
+  .loja-prontas ul {
+    grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 14rem; overflow-x: auto; scroll-snap-type: x mandatory;
+    margin-left: -1rem; margin-right: -1rem; padding: .15rem 1rem .35rem; scroll-padding: 0 1rem;
   }
-  .carrinho-barra .contador { background: var(--primaria-texto); color: var(--primaria); }
-  .carrinho-barra .espaco { text-align: left; }
-  .carrinho-fundo { display: block; position: fixed; inset: 0; z-index: 39; background: rgb(8 12 20 / 55%); border: none; padding: 0; }
-  .carrinho-fundo[hidden] { display: none; }
-  .carrinho {
-    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 40; max-height: 88dvh; overflow-y: auto; margin: 0;
-    border-radius: 18px 18px 0 0; box-shadow: var(--sombra-alta); transform: translateY(105%); visibility: hidden;
-    transition: transform .22s ease, visibility 0s .22s;
-  }
-  .carrinho.aberto { transform: none; visibility: visible; transition: transform .22s ease; }
-  .carrinho-fechar { display: inline-flex; }
+  .loja-prontas li { scroll-snap-align: start; }
+  .loja-pronta { grid-template-columns: 3.4rem minmax(0, 1fr); gap: .55rem; height: 100%; }
+  .loja-pronta-figura { width: 3.4rem; height: 2.8rem; }
+  .loja-opcoes-lista { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .loja-navegar .botao { min-height: 2.8rem; }
+  .loja-topo-carrinho { padding: 0 .45rem; gap: .25rem; }
 }
 
 /* ---------- Loja: acompanhamento, pedidos, certificado ---------- */

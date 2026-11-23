@@ -6,7 +6,7 @@
 // entradas inválidas e paginação; e, se o docker estiver à mão, a Loja recusando o pedido com o MES parado (para o
 // contêiner mes e sobe de novo; termina com tudo no ar). Sem docker: --sem-docker.
 //
-// O contêiner `mes` parado é o do projeto compose desta pasta. Para uma pilha subida com outro nome de projeto
+// O contêiner `mes` parado é o do projeto compose do docker-compose.yml (`loja-mes-aubot4000`). Para uma pilha subida com outro nome de projeto
 // (`docker compose -p <nome> up`), informe o mesmo nome em COMPOSE_PROJECT_NAME. O script confere, pela porta
 // publicada, que o `mes` desse projeto é mesmo o da URL testada; se não for, não para nada e acusa a falha.
 

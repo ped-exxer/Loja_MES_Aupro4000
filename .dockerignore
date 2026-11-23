@@ -5,3 +5,6 @@
 # Manuais em PDF e o gerador deles (fontes, logos, paged.js): não entram nos contêineres
 docs/pdf
 docs/tools
+
+# Configuração local do docker compose: não entra nas imagens
+.env
