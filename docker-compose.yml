@@ -9,9 +9,9 @@
 # Senhas fixas: a instalação é offline e local. Troque-as (aqui e em docker/banco/01-bases.sql) se o PC estiver
 # numa rede compartilhada.
 
-# Nome do projeto Compose fixo (não depende do nome da pasta): contêineres loja-mes-aubot4000-<serviço>-1,
-# volume loja-mes-aubot4000_dados-banco, rede loja-mes-aubot4000_default.
-name: loja-mes-aubot4000
+# Nome do projeto Compose fixo (não depende do nome da pasta): contêineres loja-mes-aupro4000-<serviço>-1,
+# volume loja-mes-aupro4000_dados-banco, rede loja-mes-aupro4000_default.
+name: loja-mes-aupro4000
 
 services:
   # Loja (ERP): vitrine, pedidos, faturas, catálogo, certificado. API + tela no mesmo processo.

@@ -1,4 +1,4 @@
-# Loja-MES Aubot4000: Loja (ERP) e MES da AUPRO4000
+# Loja-MES Aupro4000: Loja (ERP) e MES da AUPRO4000
 
 Loja de aula em cima da bancada **AUPRO4000** (Exxer, CLP S7-1200), em **dois sistemas**: na **Loja** (o ERP) o aluno
 compra uma batelada de água aquecida e a Loja emite a ordem de produção; o **MES** sequencia a fila e entrega ao CLP
@@ -38,7 +38,7 @@ npm run manuais                  # gera os PDFs dos manuais de docs/ em docs/pdf
 
 - **Outras portas** (a 8080 ou a 8081 já em uso no PC): `PORTA_LOJA=8090 PORTA_MES=8091 docker compose up -d --build`,
   ou de vez num `.env` na raiz (copie o `.env.example`; fica fora do git), e passe os mesmos endereços ao `ponta-a-ponta`. Uma pilha de teste ao lado da padrão sobe com outro nome de
-  projeto (`docker compose -p <nome> up`; o padrão, fixo no `docker-compose.yml`, é `loja-mes-aubot4000`); informe o
+  projeto (`docker compose -p <nome> up`; o padrão, fixo no `docker-compose.yml`, é `loja-mes-aupro4000`); informe o
   mesmo nome em `COMPOSE_PROJECT_NAME` ao rodar o teste.
 - **Telas:** claro e escuro (botão no topo; sem escolha, segue o sistema operacional), pt, en e es, do celular ao
   projetor da sala. Sem biblioteca de componentes nem arquivo de CDN: o comum fica em `packages/interface`.
